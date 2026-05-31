@@ -53,20 +53,20 @@ struct TextLine {
 };
 
 int lineHeightGfx(const lgfx::GFXfont* font) {
-  tft.setFont(font);
+  displayFontSetBitmap(tft, font);
   return tft.fontHeight();
 }
 
 int lineHeightVlw(float size) {
-  tft.setTextSize(size);
+  displayFontSetSmoothSize(tft, size);
   return tft.fontHeight();
 }
 
 void applyLineStyle(const TextLine& line) {
   if (displayFontIsSmooth()) {
-    tft.setTextSize(line.vlw_size);
+    displayFontSetSmoothSize(tft, line.vlw_size);
   } else {
-    tft.setFont(line.gfx_font);
+    displayFontSetBitmap(tft, line.gfx_font);
   }
 }
 
@@ -102,9 +102,9 @@ constexpr float kConnectingDetailVlw = 0.92f;
 
 void applyConnectingDetailStyle() {
   if (displayFontIsSmooth()) {
-    tft.setTextSize(kConnectingDetailVlw);
+    displayFontSetSmoothSize(tft, kConnectingDetailVlw);
   } else {
-    tft.setFont(&kConnectingGfxDetail);
+    displayFontSetBitmap(tft, &kConnectingGfxDetail);
   }
 }
 

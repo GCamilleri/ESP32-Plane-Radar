@@ -101,20 +101,6 @@ void attachPortalParams(WiFiManager& wm) {
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
 
-bool bootHeldFor(unsigned long hold_ms) {
-  if (digitalRead(config::kBootPin) != LOW) {
-    return false;
-  }
-  const unsigned long start = millis();
-  while (digitalRead(config::kBootPin) == LOW) {
-    if (millis() - start >= hold_ms) {
-      return true;
-    }
-    delay(10);
-  }
-  return false;
-}
-
 void markForceConfigPortal() {
   s_force_config_portal = true;
   Preferences prefs;
@@ -241,6 +227,7 @@ bool waitForLinkWithUi(const char* ssid_for_ui, unsigned long attempt_ms) {
     if (wifiLinkUp()) {
       return true;
     }
+    bootButtonPollLongPress();
     statusScreenConnectingTick();
     delay(config::kWifiConnectingFrameMs);
   }
@@ -295,7 +282,16 @@ bool openConfigPortal(WiFiManager& wm) {
   WiFi.mode(WIFI_OFF);
   delay(50);
   statusScreenPortal();
-  return wm.startConfigPortal(config::kPortalApName);
+  wm.setConfigPortalBlocking(false);
+  wm.startConfigPortal(config::kPortalApName);
+  while (wm.getConfigPortalActive()) {
+    bootButtonPollLongPress();
+    if (wm.process()) {
+      return true;
+    }
+    delay(10);
+  }
+  return wifiLinkUp();
 }
 
 }  // namespace
@@ -331,13 +327,24 @@ bool bootButtonConsumeTap() {
 
 void bootButtonPollLongPress() {
   if (wifiBootButtonPressed()) {
+    portENTER_CRITICAL(&s_boot_mux);
+    if (!s_boot_is_down) {
+      s_boot_is_down = true;
+      s_boot_down_ms = millis();
+    }
+    const unsigned long down_ms = s_boot_down_ms;
+    portEXIT_CRITICAL(&s_boot_mux);
+
     if (!s_long_press_handled &&
-        millis() - s_boot_down_ms >= config::kBootResetHoldMs) {
+        millis() - down_ms >= config::kBootResetHoldMs) {
       s_long_press_handled = true;
       Serial.println("BOOT held — resetting WiFi");
       wifiResetCredentialsAndReboot();
     }
   } else {
+    portENTER_CRITICAL(&s_boot_mux);
+    s_boot_is_down = false;
+    portEXIT_CRITICAL(&s_boot_mux);
     s_long_press_handled = false;
   }
 }
@@ -347,16 +354,6 @@ void wifiResetCredentialsAndReboot() {
   statusScreenWifiReset();
   delay(800);
   esp_restart();
-}
-
-bool wifiClearCredentialsIfBootHeld() {
-  initBootButton();
-  if (!bootHeldFor(config::kBootResetHoldMs)) {
-    return false;
-  }
-
-  wifiResetCredentialsAndReboot();
-  return true;  // unreachable
 }
 
 bool wifiReconnect() {

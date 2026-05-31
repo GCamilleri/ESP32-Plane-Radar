@@ -75,7 +75,6 @@ void setup() {
   }
   services::location::init();
   ui::radar::rangeInit();
-  wifiClearCredentialsIfBootHeld();
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();

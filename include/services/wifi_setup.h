@@ -1,6 +1,5 @@
 #pragma once
 
-bool wifiClearCredentialsIfBootHeld();
 /** True when the next boot should show the setup screen first (after credential reset). */
 bool wifiShowsSetupScreenOnBoot();
 void wifiResetCredentialsAndReboot();

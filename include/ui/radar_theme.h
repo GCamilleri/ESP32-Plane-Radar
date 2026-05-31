@@ -26,6 +26,9 @@ constexpr int kScaleBelowCardinalPx = 3;
 
 constexpr int kRingCount = 4;
 
+/** Shared grid stroke: drawWideLine half-width (~2 px total); rings use the same px count. */
+constexpr float kGridStrokeHalfWidth = 1.0f;
+
 constexpr int kCenterDotRadius = 2;
 
 /** Filled aircraft symbol (nose triangle). */
@@ -40,10 +43,10 @@ constexpr int kAircraftSpeedLineMinPx = 2;
 constexpr float kAircraftTrackRefOuterKm = 13.3f;
 /** Shorter than full 60 s horizon at ref scale; ×1.5 length boost applied. */
 constexpr float kAircraftTrackLengthScale = 1.5f / 5.0f;
-/** drawWideLine half-width (1.0 ≈ 2 px total, 1 px thicker than drawLine). */
+/** drawWideLine half-width for speed vectors (~2 px total). */
 constexpr float kAircraftTrackLineHalfWidth = 1.0f;
-/** Gap from triangle edge to tag block (px); ~⅓ tighter than 4. */
-constexpr int kAircraftLabelGapPx = 3;
+/** Gap from triangle edge to tag block (px). */
+constexpr int kAircraftLabelGapPx = 1;
 /** Keep symbol centroid inside outer ring by at least this inset (px). */
 constexpr int kAircraftInsideRingInsetPx =
     kAircraftNoseLenPx + kAircraftTailHalfPx + 1;
