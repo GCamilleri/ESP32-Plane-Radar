@@ -24,11 +24,18 @@ During setup you can also hold BOOT at power-on to force a credential reset (sam
 
 ## Wi‑Fi setup portal
 
+**First-time setup** (no saved Wi‑Fi):
+
 1. Connect to **`PlaneRadar-Setup`**
 2. Open **`http://plane-radar.local`** (preferred) or **`http://192.168.4.1`** — both are shown on the yellow setup screen; captive portal may open automatically
 3. Set home Wi‑Fi, then save
 
-mDNS hostname is configured in `config.h` as `kPortalHostname` (`plane-radar` → **plane-radar.local** on the setup AP). Some phones resolve `.local` slowly; use the IP if needed.
+**Reconfigure anytime** (after the device is on your network):
+
+1. Open **`http://plane-radar.local`** or **`http://<device-ip>`** (e.g. from your router or serial log at boot)
+2. Change Wi‑Fi, location, units, or runway overlay; save
+
+The same portal runs on the setup AP and on the device’s LAN IP while connected to Wi‑Fi. mDNS hostname is `plane-radar` → **plane-radar.local** (`kPortalHostname` in `config.h`). Some clients resolve `.local` slowly; use the IP if needed.
 
 **Custom fields** (stored in NVS):
 
