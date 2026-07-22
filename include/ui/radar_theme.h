@@ -89,6 +89,13 @@ constexpr uint8_t kRunwayLabelR = 110;
 constexpr uint8_t kRunwayLabelG = 210;
 constexpr uint8_t kRunwayLabelB = 230;
 
+/** Data freshness indicator dot. */
+constexpr uint8_t kFreshR = 0, kFreshG = 200, kFreshB = 0;
+constexpr uint8_t kAgingR = 255, kAgingG = 180, kAgingB = 0;
+constexpr uint8_t kStaleR = 255, kStaleG = 0, kStaleB = 0;
+constexpr int kFreshnessDotRadius = 4;
+constexpr int kFreshnessDotInset = 15;
+
 extern uint16_t kColorBackground;
 extern uint16_t kColorGrid;
 extern uint16_t kColorLabel;

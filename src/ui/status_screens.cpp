@@ -11,9 +11,9 @@
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 
-namespace fonts = lgfx::v1::fonts;
-
 namespace {
+
+namespace fonts = lgfx::v1::fonts;
 
 constexpr int kLineGap = 6;
 const int kCenterX = config::kDisplayWidth / 2;

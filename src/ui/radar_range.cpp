@@ -23,29 +23,30 @@ uint8_t s_range_index = kDefaultRangeIndex;
 bool s_use_miles = false;
 bool s_show_runways = true;
 
-void saveRangeIndex() {
-  if (!s_prefs.begin(kPrefsNamespace, false)) {
-    return;
+template <typename T>
+void nvsPut(const char* ns, const char* key, T value);
+
+template <>
+void nvsPut<uint8_t>(const char* ns, const char* key, uint8_t value) {
+  Preferences prefs;
+  if (prefs.begin(ns, false)) {
+    prefs.putUChar(key, value);
+    prefs.end();
   }
-  s_prefs.putUChar(kPrefsRangeKey, s_range_index);
-  s_prefs.end();
 }
 
-void saveUseMiles() {
-  if (!s_prefs.begin(kPrefsNamespace, false)) {
-    return;
+template <>
+void nvsPut<bool>(const char* ns, const char* key, bool value) {
+  Preferences prefs;
+  if (prefs.begin(ns, false)) {
+    prefs.putBool(key, value);
+    prefs.end();
   }
-  s_prefs.putBool(kPrefsMilesKey, s_use_miles);
-  s_prefs.end();
 }
 
-void saveShowRunways() {
-  if (!s_prefs.begin(kPrefsNamespace, false)) {
-    return;
-  }
-  s_prefs.putBool(kPrefsRunwaysKey, s_show_runways);
-  s_prefs.end();
-}
+void saveRangeIndex() { nvsPut<uint8_t>(kPrefsNamespace, kPrefsRangeKey, s_range_index); }
+void saveUseMiles()   { nvsPut<bool>(kPrefsNamespace, kPrefsMilesKey, s_use_miles); }
+void saveShowRunways(){ nvsPut<bool>(kPrefsNamespace, kPrefsRunwaysKey, s_show_runways); }
 
 bool portalCheckboxChecked(const char* value) {
   if (value == nullptr || value[0] == '\0') {
