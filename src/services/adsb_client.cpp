@@ -5,6 +5,7 @@
 
 #include <ArduinoJson.h>
 
+#include <algorithm>
 #include <cstring>
 
 #include "config.h"
@@ -30,8 +31,8 @@ void pollNetwork() {
 
 int performGetWithPoll(HTTPClient& http) {
   http.setConnectTimeout(kConnectAttemptMs);
-  const unsigned long deadline = millis() + kRequestTimeoutMs;
-  while (millis() < deadline) {
+  int delay_ms = 100;
+  for (int attempt = 0; attempt < 5; ++attempt) {
     pollNetwork();
     const int code = http.GET();
     if (code > 0) {
@@ -41,7 +42,8 @@ int performGetWithPoll(HTTPClient& http) {
         code != HTTPC_ERROR_NOT_CONNECTED) {
       return code;
     }
-    delay(5);
+    delay(delay_ms);
+    delay_ms = std::min(delay_ms * 2, 1000);
   }
   return HTTPC_ERROR_READ_TIMEOUT;
 }
@@ -55,11 +57,13 @@ bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
   const int content_length = http.getSize();
   if (content_length > 0) {
     payload.reserve(static_cast<unsigned>(content_length + 1));
+  } else {
+    payload.reserve(8192);
   }
 
   uint8_t buffer[512];
-  const unsigned long deadline = millis() + kRequestTimeoutMs;
-  while (millis() < deadline) {
+  const unsigned long start = millis();
+  while (millis() - start < kRequestTimeoutMs) {
     pollNetwork();
     const int available = stream->available();
     if (available > 0) {
