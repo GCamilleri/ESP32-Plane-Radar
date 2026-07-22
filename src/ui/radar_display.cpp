@@ -804,7 +804,7 @@ void drawStaticGrid(Gfx& gfx) {
   drawRings(cx, cy, grid_r);
   drawCrosshairs(cx, cy, grid_r, radar::gColorGrid);
   initPalette();
-  runway::drawLargeAirportRunways(gfx);
+  runway::drawAirportRunways(gfx);
   drawCenterDot(cx, cy);
   drawCardinalLabels();
   drawScaleLabel(cx, cy, grid_r);

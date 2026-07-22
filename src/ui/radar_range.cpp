@@ -28,7 +28,7 @@ constexpr uint8_t kDefaultPollRateIndex = 1;  // 3s
 Preferences s_prefs;
 uint8_t s_range_index = kDefaultRangeIndex;
 bool s_use_miles = false;
-bool s_show_runways = true;
+uint8_t s_runway_mode = kRunwayModeLarge;
 uint16_t s_heading_deg = 0;
 uint8_t s_label_mode = 0;
 uint8_t s_poll_rate_index = kDefaultPollRateIndex;
@@ -56,9 +56,9 @@ void nvsPut<bool>(const char* ns, const char* key, bool value) {
   }
 }
 
-void saveRangeIndex() { nvsPut<uint8_t>(kPrefsNamespace, kPrefsRangeKey, s_range_index); }
-void saveUseMiles()   { nvsPut<bool>(kPrefsNamespace, kPrefsMilesKey, s_use_miles); }
-void saveShowRunways(){ nvsPut<bool>(kPrefsNamespace, kPrefsRunwaysKey, s_show_runways); }
+void saveRangeIndex()  { nvsPut<uint8_t>(kPrefsNamespace, kPrefsRangeKey, s_range_index); }
+void saveUseMiles()    { nvsPut<bool>(kPrefsNamespace, kPrefsMilesKey, s_use_miles); }
+void saveRunwayMode()  { nvsPut<uint8_t>(kPrefsNamespace, kPrefsRunwaysKey, s_runway_mode); }
 
 bool portalCheckboxChecked(const char* value) {
   if (value == nullptr || value[0] == '\0') {
@@ -82,7 +82,11 @@ void rangeInit() {
   s_range_index =
       (saved < kRangePresetCount) ? saved : kDefaultRangeIndex;
   s_use_miles = s_prefs.getBool(kPrefsMilesKey, false);
-  s_show_runways = s_prefs.getBool(kPrefsRunwaysKey, true);
+  // Runway mode: stored as uint8_t. Old firmware stored a bool (0=off, 1=on).
+  // Both old values (0, 1) map directly to the new mode enum, so no
+  // special migration logic is needed.
+  const uint8_t rw = s_prefs.getUChar(kPrefsRunwaysKey, kRunwayModeLarge);
+  s_runway_mode = (rw < kRunwayModeCount) ? rw : kRunwayModeLarge;
 
   const uint16_t heading = s_prefs.getUShort(kPrefsHeadingKey, 0);
   s_heading_deg = (heading < 360) ? heading : 0;
@@ -116,7 +120,15 @@ float fetchRadiusKm() {
 
 bool useMiles() { return s_use_miles; }
 
-bool showRunways() { return s_show_runways; }
+bool showRunways() { return s_runway_mode > kRunwayModeOff; }
+
+uint8_t runwayMode() { return s_runway_mode; }
+
+void setRunwayMode(uint8_t mode) {
+  if (mode >= kRunwayModeCount) return;
+  s_runway_mode = mode;
+  saveRunwayMode();
+}
 
 void saveMilesFromPortal(const char* checkbox_value) {
   s_use_miles = portalCheckboxChecked(checkbox_value);
@@ -125,9 +137,12 @@ void saveMilesFromPortal(const char* checkbox_value) {
 }
 
 void saveRunwaysFromPortal(const char* checkbox_value) {
-  s_show_runways = portalCheckboxChecked(checkbox_value);
-  saveShowRunways();
-  Serial.printf("Runway overlay: %s\n", s_show_runways ? "on" : "off");
+  // Portal checkbox is a simple on/off. Map to Large (on) or Off.
+  s_runway_mode = portalCheckboxChecked(checkbox_value)
+                      ? kRunwayModeLarge
+                      : kRunwayModeOff;
+  saveRunwayMode();
+  Serial.printf("Runway overlay mode: %u\n", s_runway_mode);
 }
 
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles) {
@@ -146,7 +161,7 @@ void formatCurrentRing3Label(char* buf, size_t len) {
 
 void unitsReset() {
   s_use_miles = false;
-  s_show_runways = true;
+  s_runway_mode = kRunwayModeLarge;
   if (s_prefs.begin(kPrefsNamespace, false)) {
     s_prefs.remove(kPrefsMilesKey);
     s_prefs.remove(kPrefsRunwaysKey);

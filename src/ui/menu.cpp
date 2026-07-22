@@ -28,6 +28,7 @@ struct MenuItem {
 
 const char* const kRangeLabels[] = {"5 km", "10 km", "15 km", "25 km"};
 const char* const kLabelModeLabels[] = {"All", "Flight", "None"};
+const char* const kRunwayModeLabels[] = {"Off", "Large", "All"};
 const char* const kPollRateLabels[] = {"1s", "3s", "5s", "10s"};
 const char* const kSweepLabels[] = {"Off", "On"};
 const char* const kTrailLabels[] = {"Off", "On"};
@@ -37,6 +38,9 @@ void setRange(uint8_t v) { radar::setRangeIndex(v); }
 
 uint8_t getLabelMode() { return radar::labelMode(); }
 void setLabelMode(uint8_t v) { radar::setLabelMode(v); }
+
+uint8_t getRunwayMode() { return radar::runwayMode(); }
+void setRunwayMode(uint8_t v) { radar::setRunwayMode(v); }
 
 uint8_t getPollRate() { return radar::pollRateIndex(); }
 void setPollRate(uint8_t v) { radar::setPollRateIndex(v); }
@@ -53,7 +57,7 @@ void setTrails(uint8_t v) {
 }
 
 constexpr size_t kHeadingIndex = 1;
-constexpr size_t kSettingCount = 6;
+constexpr size_t kSettingCount = 7;
 constexpr size_t kResetWifiIndex = kSettingCount;
 constexpr size_t kMenuItemCount = kSettingCount + 1;
 
@@ -62,6 +66,8 @@ const MenuItem kMenuItems[kSettingCount] = {
     {"Heading", 0, nullptr, nullptr, nullptr},
     {"Labels", radar::kLabelModeCount, kLabelModeLabels,
      getLabelMode, setLabelMode},
+    {"Airports", radar::kRunwayModeCount, kRunwayModeLabels,
+     getRunwayMode, setRunwayMode},
     {"Poll Rate", radar::kPollRatePresetCount, kPollRateLabels,
      getPollRate, setPollRate},
     {"Sweep", 2, kSweepLabels, getSweep, setSweep},

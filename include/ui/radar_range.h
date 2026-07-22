@@ -82,4 +82,12 @@ void setSweepEnabled(bool enabled);
 bool trailsEnabled();
 void setTrailsEnabled(bool enabled);
 
+// --- Runway/airport display mode ---
+constexpr uint8_t kRunwayModeOff = 0;
+constexpr uint8_t kRunwayModeLarge = 1;
+constexpr uint8_t kRunwayModeAll = 2;
+constexpr uint8_t kRunwayModeCount = 3;
+uint8_t runwayMode();
+void setRunwayMode(uint8_t mode);
+
 }  // namespace ui::radar
