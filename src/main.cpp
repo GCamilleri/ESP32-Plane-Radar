@@ -14,6 +14,7 @@
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
 #include "services/wifi_setup.h"
+#include "ui/menu.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
@@ -21,6 +22,7 @@
 namespace {
 
 bool g_radar_visible = false;
+bool g_menu_hold_fired = false;
 unsigned long g_wifi_down_since = 0;
 unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_adsb_fetch_ms = 0;
@@ -48,9 +50,26 @@ void onRangeTap() {
 }
 
 void handleBootButton() {
-  bootButtonPollLongPress();
+  if (ui::menu::isOpen()) {
+    ui::menu::update();
+    if (!ui::menu::isOpen()) {
+      if (g_radar_visible) {
+        ui::radarDisplayDraw();
+      }
+    }
+    return;
+  }
+
   if (bootButtonConsumeTap()) {
     onRangeTap();
+  }
+
+  if (bootButtonHeldMs() >= config::kBootShortHoldMs && !g_menu_hold_fired) {
+    g_menu_hold_fired = true;
+    ui::menu::open();
+  }
+  if (!bootButtonIsHeld()) {
+    g_menu_hold_fired = false;
   }
 }
 
@@ -67,7 +86,9 @@ void fetchAndDrawAircraft() {
   }
   g_consecutive_fetch_failures = 0;
   ui::radarDisplaySetFetchFailures(0);
-  ui::radarDisplayRefreshAircraft();
+  if (!ui::menu::isOpen()) {
+    ui::radarDisplayRefreshAircraft();
+  }
   handleBootButton();
 }
 
@@ -86,6 +107,7 @@ void setup() {
   }
   services::location::init();
   ui::radar::rangeInit();
+  displayApplySavedBrightness();
   services::adsb::setPollFn(wifiLoop);
 
   if (wifiSetupConnect()) {
@@ -118,9 +140,10 @@ void loop() {
     }
   } else {
     g_wifi_down_since = 0;
-    if (!g_radar_visible) {
+    if (!g_radar_visible && !ui::menu::isOpen()) {
       showRadarIfConnected();
-    } else if (millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
+    } else if (!ui::menu::isOpen() &&
+               millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
       g_last_adsb_fetch_ms = millis();
       fetchAndDrawAircraft();
     }

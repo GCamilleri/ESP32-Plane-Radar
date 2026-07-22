@@ -28,8 +28,14 @@ void latLonToScreen(float lat, float lon, int* out_x, int* out_y) {
   float dist_km = 0.0f;
   offsetKmFromCenter(lat, lon, &dx_km, &dy_km, &dist_km);
 
-  *out_x = radar::kCenterX + static_cast<int>(lroundf(dx_km * px_per_km));
-  *out_y = radar::kCenterY - static_cast<int>(lroundf(dy_km * px_per_km));
+  const float theta = radar::headingDeg() * 0.01745329252f;
+  const float cos_t = cosf(theta);
+  const float sin_t = sinf(theta);
+  const float screen_dx = cos_t * dx_km - sin_t * dy_km;
+  const float screen_dy = sin_t * dx_km + cos_t * dy_km;
+
+  *out_x = radar::kCenterX + static_cast<int>(lroundf(screen_dx * px_per_km));
+  *out_y = radar::kCenterY - static_cast<int>(lroundf(screen_dy * px_per_km));
 }
 
 int distSqFromCenter(int x, int y) {

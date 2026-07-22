@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 /** True when the next boot should show the setup screen first (after credential reset). */
 bool wifiShowsSetupScreenOnBoot();
 void wifiResetCredentialsAndReboot();
@@ -14,5 +16,11 @@ bool wifiBootButtonPressed();
 void bootButtonInit();
 /** Latched short tap (survives blocking HTTP/display work). */
 bool bootButtonConsumeTap();
+/** Debounced multi-tap gesture. Returns tap count (0 = nothing yet). */
+uint8_t bootButtonConsumeGesture();
+/** True if the BOOT button is physically held right now. */
+bool bootButtonIsHeld();
+/** How long (ms) the current press has been held; 0 if not held. */
+unsigned long bootButtonHeldMs();
 /** Call each loop iteration; triggers WiFi reset on long hold. */
 void bootButtonPollLongPress();

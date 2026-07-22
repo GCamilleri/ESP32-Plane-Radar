@@ -22,6 +22,7 @@ static portMUX_TYPE s_boot_mux = portMUX_INITIALIZER_UNLOCKED;
 static volatile uint8_t s_boot_tap_count = 0;
 static volatile bool s_boot_is_down = false;
 static volatile unsigned long s_boot_down_ms = 0;
+static volatile unsigned long s_last_tap_ms = 0;
 static bool s_long_press_handled = false;
 static bool s_boot_interrupt_attached = false;
 
@@ -34,8 +35,9 @@ static void IRAM_ATTR onBootButtonIsr() {
     s_boot_down_ms = now;
   } else if (s_boot_is_down) {
     const unsigned long held = now - s_boot_down_ms;
-    if (held >= config::kBootTapMinMs && held < config::kBootResetHoldMs) {
+    if (held >= config::kBootTapMinMs && held < config::kBootTapMaxMs) {
       ++s_boot_tap_count;
+      s_last_tap_ms = now;
     }
     s_boot_is_down = false;
   }
@@ -382,6 +384,44 @@ bool bootButtonConsumeTap() {
   }
   portEXIT_CRITICAL(&s_boot_mux);
   return tap;
+}
+
+uint8_t bootButtonConsumeGesture() {
+  portENTER_CRITICAL(&s_boot_mux);
+  const uint8_t count = s_boot_tap_count;
+  const unsigned long last_tap = s_last_tap_ms;
+  const bool is_down = s_boot_is_down;
+  portEXIT_CRITICAL(&s_boot_mux);
+
+  if (count == 0 || is_down) {
+    return 0;
+  }
+  if (millis() - last_tap < config::kBootGestureDebounceMs) {
+    return 0;
+  }
+
+  portENTER_CRITICAL(&s_boot_mux);
+  s_boot_tap_count = 0;
+  portEXIT_CRITICAL(&s_boot_mux);
+  return count;
+}
+
+bool bootButtonIsHeld() {
+  portENTER_CRITICAL(&s_boot_mux);
+  const bool held = s_boot_is_down;
+  portEXIT_CRITICAL(&s_boot_mux);
+  return held;
+}
+
+unsigned long bootButtonHeldMs() {
+  portENTER_CRITICAL(&s_boot_mux);
+  const bool down = s_boot_is_down;
+  const unsigned long down_ms = s_boot_down_ms;
+  portEXIT_CRITICAL(&s_boot_mux);
+  if (!down) {
+    return 0;
+  }
+  return millis() - down_ms;
 }
 
 void bootButtonPollLongPress() {

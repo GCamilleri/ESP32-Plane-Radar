@@ -107,4 +107,13 @@ extern uint16_t gColorTagAltitude;
 extern uint16_t gColorRunway;
 extern uint16_t gColorRunwayLabel;
 
+/** Menu overlay colors (RGB targets, converted at runtime). */
+constexpr uint8_t kMenuBgR = 6, kMenuBgG = 12, kMenuBgB = 30;
+constexpr uint8_t kMenuSelectedR = 0, kMenuSelectedG = 200, kMenuSelectedB = 0;
+constexpr uint8_t kMenuDimR = 120, kMenuDimG = 120, kMenuDimB = 120;
+constexpr uint8_t kMenuValueR = 255, kMenuValueG = 255, kMenuValueB = 255;
+constexpr uint8_t kMenuHintR = 70, kMenuHintG = 70, kMenuHintB = 70;
+constexpr int kMenuRingRadius = 108;
+constexpr int kMenuRingThickness = 2;
+
 }  // namespace ui::radar

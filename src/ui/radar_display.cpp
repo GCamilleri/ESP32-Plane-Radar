@@ -192,10 +192,12 @@ bool beyondRingEdgeDotFromLatLon(float lat, float lon, int* out_x, int* out_y) {
   const int cx = radar::kCenterX;
   const int cy = radar::kCenterY;
   const int rim_r = radar::kCenterX - radar::kBeyondRingScreenMarginPx;
-  const float angle_rad = atan2f(dx_km, dy_km);
+  const float geo_angle_rad = atan2f(dx_km, dy_km);
+  const float heading_rad = radar::headingDeg() * 0.01745329252f;
+  const float screen_angle = geo_angle_rad - heading_rad;
 
-  *out_x = cx + static_cast<int>(lroundf(sinf(angle_rad) * rim_r));
-  *out_y = cy - static_cast<int>(lroundf(cosf(angle_rad) * rim_r));
+  *out_x = cx + static_cast<int>(lroundf(sinf(screen_angle) * rim_r));
+  *out_y = cy - static_cast<int>(lroundf(cosf(screen_angle) * rim_r));
   return true;
 }
 
@@ -311,14 +313,15 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   initTagLabelMetrics();
   applyTagStyle();
 
+  const uint8_t lbl_mode = radar::labelMode();
+  const int line_count = (lbl_mode == 0) ? 3 : 1;
   const int line_h = s_draw->fontHeight();
   const int block_w = measureTagBlockWidth(plane);
-  const int block_h = line_h * 3;
+  const int block_h = line_h * line_count;
   int ly = y - block_h / 2;
 
   const int symbol_half =
       radar::kAircraftNoseLenPx + radar::kAircraftTailHalfPx;
-  // West (left): tag toward center on the right; east (right): tag on the left.
   const bool tag_on_right = x < radar::kCenterX;
   int anchor_x = 0;
   if (tag_on_right) {
@@ -336,6 +339,7 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
     s_draw->setTextColor(radar::gColorLabel, radar::gColorBackground);
     s_draw->drawString(plane.callsign, anchor_x, ly);
   }
+  if (lbl_mode != 0) return;
   ly += line_h;
 
   if (plane.type[0] != '\0') {
@@ -419,17 +423,23 @@ void drawAircraft() {
             [](const AircraftDrawItem& a, const AircraftDrawItem& b) {
               return a.dist_sq > b.dist_sq;
             });
+  const float h_deg = radar::headingDeg();
   for (size_t d = 0; d < draw_count; ++d) {
     const size_t i = s_draw_items[d].index;
     const int x = s_draw_items[d].x;
     const int y = s_draw_items[d].y;
-    drawSpeedVector(x, y, planes[i].nose_deg, planes[i].track_deg,
+    drawSpeedVector(x, y, planes[i].nose_deg - h_deg,
+                    planes[i].track_deg - h_deg,
                     planes[i].gs_knots, radar::gColorTrackVector);
-    drawHeadingTriangle(x, y, planes[i].nose_deg, radar::gColorAircraft);
+    drawHeadingTriangle(x, y, planes[i].nose_deg - h_deg,
+                        radar::gColorAircraft);
   }
-  for (size_t d = 0; d < draw_count; ++d) {
-    const size_t i = s_draw_items[d].index;
-    drawAircraftTag(s_draw_items[d].x, s_draw_items[d].y, planes[i]);
+  const uint8_t lbl_mode = radar::labelMode();
+  if (lbl_mode < 2) {
+    for (size_t d = 0; d < draw_count; ++d) {
+      const size_t i = s_draw_items[d].index;
+      drawAircraftTag(s_draw_items[d].x, s_draw_items[d].y, planes[i]);
+    }
   }
 }
 
@@ -522,11 +532,17 @@ void drawCardinalLabels() {
   const int cy = radar::kCenterY;
   const int edge = radar::kSize - 1;
 
-  drawCardinalLabel("N", cx, radar::kCardinalNorthOffsetY, textdatum_t::top_center);
-  drawCardinalLabel("S", cx, edge + radar::kCardinalSouthOffsetY,
-                    textdatum_t::bottom_center);
-  drawCardinalLabel("W", 0, cy, textdatum_t::middle_left);
-  drawCardinalLabel("E", edge, cy, textdatum_t::middle_right);
+  constexpr const char* kCardinals[] = {"N", "E", "S", "W"};
+  const uint8_t h = radar::headingIndex();
+
+  drawCardinalLabel(kCardinals[h],
+                    cx, radar::kCardinalNorthOffsetY, textdatum_t::top_center);
+  drawCardinalLabel(kCardinals[(h + 1) % 4],
+                    edge, cy, textdatum_t::middle_right);
+  drawCardinalLabel(kCardinals[(h + 2) % 4],
+                    cx, edge + radar::kCardinalSouthOffsetY, textdatum_t::bottom_center);
+  drawCardinalLabel(kCardinals[(h + 3) % 4],
+                    0, cy, textdatum_t::middle_left);
 }
 
 int scaleLabelAnchorX(int cx, int outer_radius) {

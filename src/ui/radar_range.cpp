@@ -15,13 +15,22 @@ constexpr char kPrefsNamespace[] = "planeradar";
 constexpr char kPrefsRangeKey[] = "rangeIdx";
 constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
+constexpr char kPrefsBrightnessKey[] = "bright";
+constexpr char kPrefsHeadingKey[] = "heading";
+constexpr char kPrefsLabelModeKey[] = "labels";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
+
+constexpr uint8_t kBrightnessValues[] = {255, 191, 128, 64, 26};
+constexpr float kHeadingValues[] = {0.0f, 90.0f, 180.0f, 270.0f};
 
 Preferences s_prefs;
 uint8_t s_range_index = kDefaultRangeIndex;
 bool s_use_miles = false;
 bool s_show_runways = true;
+uint8_t s_brightness_index = 0;
+uint8_t s_heading_index = 0;
+uint8_t s_label_mode = 0;
 
 template <typename T>
 void nvsPut(const char* ns, const char* key, T value);
@@ -71,6 +80,16 @@ void rangeInit() {
       (saved < kRangePresetCount) ? saved : kDefaultRangeIndex;
   s_use_miles = s_prefs.getBool(kPrefsMilesKey, false);
   s_show_runways = s_prefs.getBool(kPrefsRunwaysKey, true);
+
+  const uint8_t bright = s_prefs.getUChar(kPrefsBrightnessKey, 0);
+  s_brightness_index = (bright < kBrightnessPresetCount) ? bright : 0;
+
+  const uint8_t heading = s_prefs.getUChar(kPrefsHeadingKey, 0);
+  s_heading_index = (heading < kHeadingPresetCount) ? heading : 0;
+
+  const uint8_t labels = s_prefs.getUChar(kPrefsLabelModeKey, 0);
+  s_label_mode = (labels < kLabelModeCount) ? labels : 0;
+
   s_prefs.end();
 }
 
@@ -126,6 +145,42 @@ void unitsReset() {
     s_prefs.remove(kPrefsRunwaysKey);
     s_prefs.end();
   }
+}
+
+uint8_t rangeIndex() { return s_range_index; }
+
+void setRangeIndex(uint8_t idx) {
+  if (idx >= kRangePresetCount) return;
+  s_range_index = idx;
+  saveRangeIndex();
+}
+
+uint8_t brightnessIndex() { return s_brightness_index; }
+
+uint8_t brightnessValue() { return kBrightnessValues[s_brightness_index]; }
+
+void setBrightnessIndex(uint8_t idx) {
+  if (idx >= kBrightnessPresetCount) return;
+  s_brightness_index = idx;
+  nvsPut<uint8_t>(kPrefsNamespace, kPrefsBrightnessKey, idx);
+}
+
+uint8_t headingIndex() { return s_heading_index; }
+
+float headingDeg() { return kHeadingValues[s_heading_index]; }
+
+void setHeadingIndex(uint8_t idx) {
+  if (idx >= kHeadingPresetCount) return;
+  s_heading_index = idx;
+  nvsPut<uint8_t>(kPrefsNamespace, kPrefsHeadingKey, idx);
+}
+
+uint8_t labelMode() { return s_label_mode; }
+
+void setLabelMode(uint8_t mode) {
+  if (mode >= kLabelModeCount) return;
+  s_label_mode = mode;
+  nvsPut<uint8_t>(kPrefsNamespace, kPrefsLabelModeKey, mode);
 }
 
 }  // namespace ui::radar

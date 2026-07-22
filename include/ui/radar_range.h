@@ -52,4 +52,25 @@ void formatCurrentRing3Label(char* buf, size_t len);
 /** Reset distance units to km (e.g. with WiFi credential wipe). */
 void unitsReset();
 
+// --- Range by index (for menu) ---
+uint8_t rangeIndex();
+void setRangeIndex(uint8_t idx);
+
+// --- Display brightness ---
+constexpr uint8_t kBrightnessPresetCount = 5;
+uint8_t brightnessIndex();
+uint8_t brightnessValue();
+void setBrightnessIndex(uint8_t idx);
+
+// --- Heading rotation ---
+constexpr uint8_t kHeadingPresetCount = 4;
+uint8_t headingIndex();
+float headingDeg();
+void setHeadingIndex(uint8_t idx);
+
+// --- Aircraft label mode ---
+constexpr uint8_t kLabelModeCount = 3;
+uint8_t labelMode();
+void setLabelMode(uint8_t mode);
+
 }  // namespace ui::radar

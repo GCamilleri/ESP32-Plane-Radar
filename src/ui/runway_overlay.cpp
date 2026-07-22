@@ -34,6 +34,7 @@ size_t s_cached_segment_count = 0;
 CachedLabel s_cached_labels[kMaxAirportLabels];
 size_t s_cached_label_count = 0;
 float s_cached_outer_km = -1.0f;
+float s_cached_heading_deg = -1.0f;
 
 bool s_runway_label_ready = false;
 bool s_runway_label_use_vlw = false;
@@ -245,6 +246,7 @@ void rebuildRunwayCache(lgfx::LGFXBase& gfx) {
   }
 
   s_cached_outer_km = radar::rangeCurrent().outer_km;
+  s_cached_heading_deg = radar::headingDeg();
 }
 
 }  // namespace
@@ -255,9 +257,10 @@ void drawLargeAirportRunways(lgfx::LGFXBase& gfx) {
   }
   displayFontEnsureLoaded(gfx);
 
-  // Rebuild the cache only when the range preset changes.
   const float current_outer_km = radar::rangeCurrent().outer_km;
-  if (s_cached_outer_km != current_outer_km) {
+  const float current_heading = radar::headingDeg();
+  if (s_cached_outer_km != current_outer_km ||
+      s_cached_heading_deg != current_heading) {
     rebuildRunwayCache(gfx);
   }
 

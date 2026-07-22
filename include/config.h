@@ -28,6 +28,16 @@ constexpr gpio_num_t kBootPin = GPIO_NUM_9;
 constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = 40UL;
+/** Taps longer than this are treated as holds, not taps. */
+constexpr unsigned long kBootTapMaxMs = 500UL;
+/** Wait after last tap before reporting gesture (multi-tap detection window). */
+constexpr unsigned long kBootGestureDebounceMs = 400UL;
+/** Hold duration for menu select/back action. */
+constexpr unsigned long kBootShortHoldMs = 1000UL;
+
+// --- Menu ---
+/** Exit menu after this many ms of no interaction. */
+constexpr unsigned long kMenuTimeoutMs = 4000UL;
 
 // --- Display: GC9A01 1.28" round 240×240 (SPI) ---
 constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
