@@ -4,7 +4,6 @@
 #include <cstring>
 
 #include "services/adsb_client.h"
-#include "ui/radar_geo.h"
 
 namespace ui::trails {
 namespace {
@@ -46,8 +45,8 @@ AircraftTrail* allocTrail(const char* callsign) {
   return t;
 }
 
-void pushPoint(AircraftTrail* t, int16_t x, int16_t y) {
-  t->points[t->head] = {x, y};
+void pushPoint(AircraftTrail* t, float lat, float lon) {
+  t->points[t->head] = {lat, lon};
   t->head = (t->head + 1) % kTrailLength;
   if (t->count < kTrailLength) ++t->count;
   t->last_seen_ms = millis();
@@ -90,12 +89,9 @@ void recordPositions() {
   for (size_t i = 0; i < n; ++i) {
     if (planes[i].callsign[0] == '\0') continue;
 
-    int sx = 0, sy = 0;
-    geo::latLonToScreen(planes[i].lat, planes[i].lon, &sx, &sy);
-
     AircraftTrail* t = findTrail(planes[i].callsign);
     if (!t) t = allocTrail(planes[i].callsign);
-    pushPoint(t, static_cast<int16_t>(sx), static_cast<int16_t>(sy));
+    pushPoint(t, planes[i].lat, planes[i].lon);
   }
 }
 

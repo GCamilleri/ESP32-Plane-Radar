@@ -370,32 +370,31 @@ void drawTrails() {
     if (t.count < 2) continue;
 
     for (uint8_t j = 0; j < t.count; ++j) {
-      // Read in reverse chronological order (most recent = brightest).
       const uint8_t idx =
           (t.head + trails::kTrailLength - 1 - j) % trails::kTrailLength;
       const auto& p = t.points[idx];
 
-      // Skip if outside visible area.
-      if (geo::distSqFromCenter(p.x, p.y) > max_r_sq) continue;
+      int sx = 0, sy = 0;
+      geo::latLonToScreen(p.lat, p.lon, &sx, &sy);
 
-      // Fade: newest = bright, oldest = dim.
+      if (geo::distSqFromCenter(sx, sy) > max_r_sq) continue;
+
       const float fade =
           1.0f - (static_cast<float>(j) / static_cast<float>(t.count));
       const uint8_t alpha = static_cast<uint8_t>(fade * 180.0f);
 
-      // Use aircraft color (red) at varying intensity.
       uint16_t color;
       if (config::kDisplayRgbOrder) {
-        color = s_draw->color565(0, 0, alpha);  // BGR: blue channel for red
+        color = s_draw->color565(0, 0, alpha);
       } else {
         color = s_draw->color565(alpha, 0, 0);
       }
 
       const int radius = (j == 0) ? 2 : 1;
       if (radius > 1) {
-        s_draw->fillCircle(p.x, p.y, radius, color);
+        s_draw->fillCircle(sx, sy, radius, color);
       } else {
-        s_draw->drawPixel(p.x, p.y, color);
+        s_draw->drawPixel(sx, sy, color);
       }
     }
   }

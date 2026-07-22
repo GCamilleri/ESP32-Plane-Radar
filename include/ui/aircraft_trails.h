@@ -9,7 +9,7 @@ constexpr size_t kMaxTracked = 48;
 constexpr size_t kTrailLength = 8;
 
 struct TrailPoint {
-  int16_t x, y;
+  float lat, lon;
 };
 
 struct AircraftTrail {
