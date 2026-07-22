@@ -6,7 +6,7 @@
 namespace ui::trails {
 
 constexpr size_t kMaxTracked = 48;
-constexpr size_t kTrailLength = 8;
+constexpr size_t kTrailLength = 16;
 
 struct TrailPoint {
   float lat, lon;

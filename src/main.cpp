@@ -14,7 +14,6 @@
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
 #include "services/wifi_setup.h"
-#include "ui/aircraft_trails.h"
 #include "ui/menu.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
@@ -84,7 +83,6 @@ void handleAsyncFetchResult() {
   if (ok) {
     g_consecutive_fetch_failures = 0;
     ui::radarDisplaySetFetchFailures(0);
-    ui::trails::recordPositions();
   } else {
     if (g_consecutive_fetch_failures < 255) {
       ++g_consecutive_fetch_failures;
@@ -108,7 +106,6 @@ void setup() {
   }
   services::location::init();
   ui::radar::rangeInit();
-  ui::trails::setEnabled(ui::radar::trailsEnabled());
   services::adsb::setPollFn(wifiLoop);
   services::adsb::fetchInit();
 

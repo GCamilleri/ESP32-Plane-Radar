@@ -4,6 +4,8 @@
 #include <cstring>
 
 #include "services/adsb_client.h"
+#include "ui/radar_geo.h"
+#include "ui/radar_theme.h"
 
 namespace ui::trails {
 namespace {
@@ -86,8 +88,15 @@ void recordPositions() {
   const size_t n = services::adsb::aircraftCount();
   const auto* planes = services::adsb::aircraftList();
 
+  const int max_r = radar::kGridOuterRadius - radar::kAircraftInsideRingInsetPx;
+  const int max_r_sq = max_r * max_r;
+
   for (size_t i = 0; i < n; ++i) {
     if (planes[i].callsign[0] == '\0') continue;
+
+    int sx = 0, sy = 0;
+    geo::latLonToScreen(planes[i].lat, planes[i].lon, &sx, &sy);
+    if (geo::distSqFromCenter(sx, sy) > max_r_sq) continue;
 
     AircraftTrail* t = findTrail(planes[i].callsign);
     if (!t) t = allocTrail(planes[i].callsign);

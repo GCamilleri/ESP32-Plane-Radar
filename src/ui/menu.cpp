@@ -10,7 +10,6 @@
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 #include "services/wifi_setup.h"
-#include "ui/aircraft_trails.h"
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
 
@@ -32,7 +31,6 @@ const char* const kLabelModeLabels[] = {"All", "Flight", "None"};
 const char* const kRunwayModeLabels[] = {"Off", "Large", "All"};
 const char* const kPollRateLabels[] = {"1s", "3s", "5s", "10s"};
 const char* const kSweepLabels[] = {"Off", "On"};
-const char* const kTrailLabels[] = {"Off", "On"};
 
 uint8_t getRange() { return radar::rangeIndex(); }
 void setRange(uint8_t v) { radar::setRangeIndex(v); }
@@ -49,16 +47,8 @@ void setPollRate(uint8_t v) { radar::setPollRateIndex(v); }
 uint8_t getSweep() { return radar::sweepEnabled() ? 1 : 0; }
 void setSweep(uint8_t v) { radar::setSweepEnabled(v == 1); }
 
-uint8_t getTrails() { return radar::trailsEnabled() ? 1 : 0; }
-void setTrails(uint8_t v) {
-  const bool on = (v == 1);
-  radar::setTrailsEnabled(on);
-  trails::setEnabled(on);
-  if (!on) trails::init();
-}
-
 constexpr size_t kHeadingIndex = 1;
-constexpr size_t kSettingCount = 7;
+constexpr size_t kSettingCount = 6;
 constexpr size_t kResetWifiIndex = kSettingCount;
 constexpr size_t kMenuItemCount = kSettingCount + 1;
 
@@ -72,7 +62,6 @@ const MenuItem kMenuItems[kSettingCount] = {
     {"Poll Rate", radar::kPollRatePresetCount, kPollRateLabels,
      getPollRate, setPollRate},
     {"Sweep", 2, kSweepLabels, getSweep, setSweep},
-    {"Trails", 2, kTrailLabels, getTrails, setTrails},
 };
 
 const char* compassDir(uint16_t deg) {
