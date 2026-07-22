@@ -500,7 +500,21 @@ void drawCrosshairs(int cx, int cy, int radius, uint16_t color) {
 }
 
 void drawCenterDot(int cx, int cy) {
-  s_draw->fillSmoothCircle(cx, cy, radar::kCenterDotRadius, radar::gColorCenter);
+  uint8_t r, g, b;
+  if (s_fetch_failures < 3) {
+    r = radar::kFreshR; g = radar::kFreshG; b = radar::kFreshB;
+  } else if (s_fetch_failures < 10) {
+    r = radar::kAgingR; g = radar::kAgingG; b = radar::kAgingB;
+  } else {
+    r = radar::kStaleR; g = radar::kStaleG; b = radar::kStaleB;
+  }
+  uint16_t color;
+  if (config::kDisplayRgbOrder) {
+    color = tft.color565(b, g, r);
+  } else {
+    color = tft.color565(r, g, b);
+  }
+  s_draw->fillSmoothCircle(cx, cy, radar::kCenterDotRadius, color);
 }
 
 void drawCardinalLabels() {
@@ -559,28 +573,6 @@ bool ensureFrameSprite() {
   return true;
 }
 
-void drawFreshnessDot() {
-  uint8_t r, g, b;
-  if (s_fetch_failures < 3) {
-    r = radar::kFreshR; g = radar::kFreshG; b = radar::kFreshB;
-  } else if (s_fetch_failures < 10) {
-    r = radar::kAgingR; g = radar::kAgingG; b = radar::kAgingB;
-  } else {
-    r = radar::kStaleR; g = radar::kStaleG; b = radar::kStaleB;
-  }
-  uint16_t color;
-  if (config::kDisplayRgbOrder) {
-    color = tft.color565(b, g, r);
-  } else {
-    color = tft.color565(r, g, b);
-  }
-  const int dx = radar::kCenterX + radar::kGridOuterRadius -
-                 radar::kFreshnessDotInset;
-  const int dy = radar::kCenterY + radar::kGridOuterRadius -
-                 radar::kFreshnessDotInset;
-  s_draw->fillSmoothCircle(dx, dy, radar::kFreshnessDotRadius, color);
-}
-
 // Double-buffered frame: composite the grid AND aircraft into the off-screen
 // sprite, then blit it to the panel in a single pushSprite. Because the panel
 // is updated in one pass, labels never show an erase/redraw gap — no flicker.
@@ -589,7 +581,7 @@ void renderFrame() {
   {
     const DrawScope scope(s_frame);
     drawAircraft();
-    drawFreshnessDot();
+
   }
   s_frame.pushSprite(0, 0);
   tft.setTextDatum(textdatum_t::top_left);
@@ -610,7 +602,6 @@ void radarDisplayDraw() {
   const DrawScope scope(tft);
   drawStaticGrid(tft);
   drawAircraft();
-  drawFreshnessDot();
   tft.setTextDatum(textdatum_t::top_left);
 }
 

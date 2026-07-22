@@ -93,8 +93,8 @@ constexpr uint8_t kRunwayLabelB = 230;
 constexpr uint8_t kFreshR = 0, kFreshG = 200, kFreshB = 0;
 constexpr uint8_t kAgingR = 255, kAgingG = 180, kAgingB = 0;
 constexpr uint8_t kStaleR = 255, kStaleG = 0, kStaleB = 0;
-constexpr int kFreshnessDotRadius = 4;
-constexpr int kFreshnessDotInset = 15;
+constexpr int kFreshnessDotRadius = 3;
+constexpr int kFreshnessDotInset = 6;
 
 extern uint16_t gColorBackground;
 extern uint16_t gColorGrid;
