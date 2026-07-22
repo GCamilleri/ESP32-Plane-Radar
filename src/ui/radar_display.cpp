@@ -36,6 +36,9 @@ namespace {
 
 uint8_t s_fetch_failures = 0;
 
+float s_sweep_angle_deg = 0.0f;
+unsigned long s_last_sweep_ms = 0;
+
 bool s_label_metrics_ready = false;
 bool s_cardinal_use_vlw = false;
 bool s_scale_use_vlw = false;
@@ -514,6 +517,44 @@ void drawAircraftTagPlaced(const LabelPlacement& place,
   }
 }
 
+void drawSweep() {
+  if (!radar::sweepEnabled()) return;
+
+  const unsigned long now = millis();
+  if (s_last_sweep_ms == 0) {
+    s_last_sweep_ms = now;
+    return;
+  }
+
+  const float elapsed_s = static_cast<float>(now - s_last_sweep_ms) / 1000.0f;
+  s_last_sweep_ms = now;
+
+  s_sweep_angle_deg += radar::kSweepDegreesPerSec * elapsed_s;
+  if (s_sweep_angle_deg >= 360.0f) s_sweep_angle_deg -= 360.0f;
+
+  constexpr float kDegToRad = 0.01745329252f;
+  const int cx = radar::kCenterX;
+  const int cy = radar::kCenterY;
+  const int r = radar::kGridOuterRadius;
+
+  for (int t = radar::kSweepTrailCount; t >= 0; --t) {
+    const float angle =
+        (s_sweep_angle_deg - t * radar::kSweepTrailSpacingDeg) * kDegToRad;
+    const int ex = cx + static_cast<int>(lroundf(sinf(angle) * r));
+    const int ey = cy - static_cast<int>(lroundf(cosf(angle) * r));
+
+    uint8_t green;
+    if (t == 0) {
+      green = radar::kSweepLeadingGreen;
+    } else {
+      green = static_cast<uint8_t>(100 / t);
+    }
+
+    const uint16_t color = s_draw->color565(0, green, 0);
+    s_draw->drawLine(cx, cy, ex, ey, color);
+  }
+}
+
 void drawAircraft() {
   initLabelMetrics();
 
@@ -746,8 +787,8 @@ void renderFrame() {
   drawStaticGrid(s_frame);  // opens its own DrawScope(s_frame)
   {
     const DrawScope scope(s_frame);
+    drawSweep();
     drawAircraft();
-
   }
   s_frame.pushSprite(0, 0);
   tft.setTextDatum(textdatum_t::top_left);
@@ -767,6 +808,7 @@ void radarDisplayDraw() {
   // Fallback when the sprite can't be allocated: draw straight to the panel.
   const DrawScope scope(tft);
   drawStaticGrid(tft);
+  drawSweep();
   drawAircraft();
   tft.setTextDatum(textdatum_t::top_left);
 }

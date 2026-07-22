@@ -107,6 +107,12 @@ extern uint16_t gColorTagAltitude;
 extern uint16_t gColorRunway;
 extern uint16_t gColorRunwayLabel;
 
+/** Sweep line constants. */
+constexpr float kSweepDegreesPerSec = 60.0f;
+constexpr int kSweepTrailCount = 3;
+constexpr float kSweepTrailSpacingDeg = 4.0f;
+constexpr uint8_t kSweepLeadingGreen = 200;
+
 /** Menu overlay colors (RGB targets, converted at runtime). */
 constexpr uint8_t kMenuBgR = 6, kMenuBgG = 12, kMenuBgB = 30;
 constexpr uint8_t kMenuSelectedR = 0, kMenuSelectedG = 200, kMenuSelectedB = 0;

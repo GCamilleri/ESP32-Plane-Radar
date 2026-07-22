@@ -74,4 +74,8 @@ uint8_t pollRateIndex();
 void setPollRateIndex(uint8_t idx);
 unsigned long pollRateMs();
 
+// --- Sweep line ---
+bool sweepEnabled();
+void setSweepEnabled(bool enabled);
+
 }  // namespace ui::radar
