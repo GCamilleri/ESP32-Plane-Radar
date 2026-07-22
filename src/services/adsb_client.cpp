@@ -1,5 +1,8 @@
 #include "services/adsb_client.h"
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 
@@ -315,6 +318,54 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 
   s_aircraft_count = n;
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
+  return true;
+}
+
+namespace {
+
+TaskHandle_t s_fetch_task_handle = nullptr;
+volatile bool s_async_busy = false;
+volatile bool s_async_result_ready = false;
+volatile bool s_async_success = false;
+double s_async_lat = 0;
+double s_async_lon = 0;
+float s_async_radius_km = 0;
+
+void fetchTaskFn(void*) {
+  for (;;) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    PollFn saved = s_poll_fn;
+    s_poll_fn = nullptr;
+    s_async_success = fetchUpdate(s_async_lat, s_async_lon, s_async_radius_km);
+    s_poll_fn = saved;
+    s_async_result_ready = true;
+    s_async_busy = false;
+  }
+}
+
+}  // namespace
+
+void fetchInit() {
+  xTaskCreate(fetchTaskFn, "adsb", 8192, nullptr, 1, &s_fetch_task_handle);
+}
+
+void fetchStartAsync(double center_lat, double center_lon,
+                     float fetch_radius_km) {
+  if (s_async_busy) return;
+  s_async_lat = center_lat;
+  s_async_lon = center_lon;
+  s_async_radius_km = fetch_radius_km;
+  s_async_busy = true;
+  s_async_result_ready = false;
+  xTaskNotifyGive(s_fetch_task_handle);
+}
+
+bool fetchAsyncBusy() { return s_async_busy; }
+
+bool fetchAsyncConsumeResult(bool* success) {
+  if (!s_async_result_ready) return false;
+  *success = s_async_success;
+  s_async_result_ready = false;
   return true;
 }
 

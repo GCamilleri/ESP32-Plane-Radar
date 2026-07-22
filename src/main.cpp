@@ -22,11 +22,14 @@
 
 namespace {
 
+constexpr unsigned long kFrameIntervalMs = 50;
+
 bool g_radar_visible = false;
 bool g_menu_hold_fired = false;
 unsigned long g_wifi_down_since = 0;
 unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_adsb_fetch_ms = 0;
+unsigned long g_last_frame_ms = 0;
 uint8_t g_consecutive_fetch_failures = 0;
 
 void showRadarIfConnected() {
@@ -74,24 +77,20 @@ void handleBootButton() {
   }
 }
 
-void fetchAndDrawAircraft() {
-  const float fetch_km = ui::radar::fetchRadiusKm();
-  if (!services::adsb::fetchUpdate(services::location::lat(),
-                                   services::location::lon(), fetch_km)) {
+void handleAsyncFetchResult() {
+  bool ok = false;
+  if (!services::adsb::fetchAsyncConsumeResult(&ok)) return;
+
+  if (ok) {
+    g_consecutive_fetch_failures = 0;
+    ui::radarDisplaySetFetchFailures(0);
+    ui::trails::recordPositions();
+  } else {
     if (g_consecutive_fetch_failures < 255) {
       ++g_consecutive_fetch_failures;
     }
     ui::radarDisplaySetFetchFailures(g_consecutive_fetch_failures);
-    handleBootButton();
-    return;
   }
-  g_consecutive_fetch_failures = 0;
-  ui::radarDisplaySetFetchFailures(0);
-  ui::trails::recordPositions();
-  if (!ui::menu::isOpen()) {
-    ui::radarDisplayRefreshAircraft();
-  }
-  handleBootButton();
 }
 
 }  // namespace
@@ -111,6 +110,7 @@ void setup() {
   ui::radar::rangeInit();
   ui::trails::setEnabled(ui::radar::trailsEnabled());
   services::adsb::setPollFn(wifiLoop);
+  services::adsb::fetchInit();
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();
@@ -120,6 +120,7 @@ void setup() {
 void loop() {
   handleBootButton();
   wifiLoop();
+  handleAsyncFetchResult();
 
   if (WiFi.status() != WL_CONNECTED) {
     if (g_radar_visible) {
@@ -144,12 +145,20 @@ void loop() {
     g_wifi_down_since = 0;
     if (!g_radar_visible && !ui::menu::isOpen()) {
       showRadarIfConnected();
-    } else if (!ui::menu::isOpen() &&
+    } else if (!services::adsb::fetchAsyncBusy() && !ui::menu::isOpen() &&
                millis() - g_last_adsb_fetch_ms >= ui::radar::pollRateMs()) {
       g_last_adsb_fetch_ms = millis();
-      fetchAndDrawAircraft();
+      services::adsb::fetchStartAsync(services::location::lat(),
+                                      services::location::lon(),
+                                      ui::radar::fetchRadiusKm());
     }
   }
 
-  delay(10);
+  if (g_radar_visible && !ui::menu::isOpen() &&
+      millis() - g_last_frame_ms >= kFrameIntervalMs) {
+    g_last_frame_ms = millis();
+    ui::radarDisplayRefreshAircraft();
+  }
+
+  delay(5);
 }

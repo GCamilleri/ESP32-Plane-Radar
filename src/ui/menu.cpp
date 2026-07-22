@@ -2,6 +2,7 @@
 
 #include <lgfx/v1/lgfx_fonts.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -155,11 +156,19 @@ void drawMenuScreen() {
 
   constexpr int kItemStartY = 72;
   constexpr int kItemSpacing = 28;
+  constexpr int kItemsPerPage = 4;
   constexpr int kDotRadius = 3;
   constexpr int kDotOffsetX = -55;
 
-  for (size_t i = 0; i < kMenuItemCount; ++i) {
-    const int y = kItemStartY + static_cast<int>(i) * kItemSpacing;
+  const size_t page = s_cursor / kItemsPerPage;
+  const size_t page_start = page * kItemsPerPage;
+  const size_t page_end = std::min(page_start + kItemsPerPage, kMenuItemCount);
+  const size_t total_pages =
+      (kMenuItemCount + kItemsPerPage - 1) / kItemsPerPage;
+
+  for (size_t i = page_start; i < page_end; ++i) {
+    const int slot = static_cast<int>(i - page_start);
+    const int y = kItemStartY + slot * kItemSpacing;
     const bool selected = (i == s_cursor);
     const bool is_reset = (i == kResetWifiIndex);
     const uint16_t color = is_reset
@@ -172,7 +181,7 @@ void drawMenuScreen() {
     }
 
     if (displayFontIsSmooth()) {
-      displayFontSetSmoothSize(tft, selected ? 0.85f : 0.78f);
+      displayFontSetSmoothSize(tft, selected ? 0.90f : 0.82f);
     } else {
       tft.setFont(selected ? &lgfx::v1::fonts::FreeSansBold12pt7b
                            : &lgfx::v1::fonts::FreeSans9pt7b);
@@ -188,7 +197,7 @@ void drawMenuScreen() {
     tft.drawString(kMenuItems[i].label, cx + kDotOffsetX + 10, y);
 
     if (displayFontIsSmooth()) {
-      displayFontSetSmoothSize(tft, 0.72f);
+      displayFontSetSmoothSize(tft, 0.76f);
     } else {
       tft.setFont(&lgfx::v1::fonts::Font2);
     }
@@ -202,6 +211,23 @@ void drawMenuScreen() {
     }
   }
 
+  // Page indicator dots
+  if (total_pages > 1) {
+    constexpr int kPageDotRadius = 2;
+    constexpr int kPageDotGap = 10;
+    const int dots_width = (static_cast<int>(total_pages) - 1) * kPageDotGap;
+    const int dots_x = cx - dots_width / 2;
+    constexpr int kPageDotsY = 188;
+    for (size_t p = 0; p < total_pages; ++p) {
+      const int dx = dots_x + static_cast<int>(p) * kPageDotGap;
+      if (p == page) {
+        tft.fillSmoothCircle(dx, kPageDotsY, kPageDotRadius, s_color_selected);
+      } else {
+        tft.drawCircle(dx, kPageDotsY, kPageDotRadius, s_color_dim);
+      }
+    }
+  }
+
   // Hint at bottom
   if (displayFontIsSmooth()) {
     displayFontSetSmoothSize(tft, 0.65f);
@@ -210,7 +236,7 @@ void drawMenuScreen() {
   }
   tft.setTextDatum(textdatum_t::middle_center);
   tft.setTextColor(s_color_hint, s_color_bg);
-  tft.drawString("tap:next  hold:select", cx, 200);
+  tft.drawString("tap:next  hold:select", cx, 205);
 }
 
 void drawSettingScreen() {

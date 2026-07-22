@@ -38,7 +38,6 @@ namespace {
 uint8_t s_fetch_failures = 0;
 
 float s_sweep_angle_deg = 0.0f;
-unsigned long s_last_sweep_ms = 0;
 
 bool s_label_metrics_ready = false;
 bool s_cardinal_use_vlw = false;
@@ -564,17 +563,9 @@ void drawAircraftTagPlaced(const LabelPlacement& place,
 void drawSweep() {
   if (!radar::sweepEnabled()) return;
 
-  const unsigned long now = millis();
-  if (s_last_sweep_ms == 0) {
-    s_last_sweep_ms = now;
-    return;
-  }
-
-  const float elapsed_s = static_cast<float>(now - s_last_sweep_ms) / 1000.0f;
-  s_last_sweep_ms = now;
-
-  s_sweep_angle_deg += radar::kSweepDegreesPerSec * elapsed_s;
-  if (s_sweep_angle_deg >= 360.0f) s_sweep_angle_deg -= 360.0f;
+  s_sweep_angle_deg =
+      fmodf(static_cast<float>(millis()) * radar::kSweepDegreesPerSec / 1000.0f,
+            360.0f);
 
   constexpr float kDegToRad = 0.01745329252f;
   const int cx = radar::kCenterX;
