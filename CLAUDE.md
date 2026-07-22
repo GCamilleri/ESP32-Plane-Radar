@@ -71,7 +71,13 @@ The firmware has four layers. Dependencies flow downward only.
 - **NVS namespaces**: `"wifi"` for force-portal flag, `"radar"` for lat/lon, `"planeradar"` for range index / miles / runways.
 - **GC9A01 BGR quirk**: the panel uses BGR subpixel order. `initPalette()` swaps R and B channels in `color565()` calls when `kDisplayRgbOrder` is true, so logical red appears red on screen.
 - **Partition layout**: custom 4 MB partition table (`partitions/plane_radar.csv`) with a single 3 MB app slot (no OTA), 896 KB SPIFFS, and a coredump partition.
-- **WiFi TX power**: set to 8.5 dBm in both AP and STA modes to stay within safe power limits for the board.
+- **WiFi TX power**: set to 11 dBm in both AP and STA modes. The ESP32-C3 Super Mini has thermal issues at higher power due to poor antenna matching on cheap boards; 11 dBm is safe in sealed PETG enclosures (PETG Tg ~80°C, chip max 85°C). Do not exceed ~15 dBm without venting.
+- **Build version**: `scripts/build_version.py` injects the git hash as `BUILD_GIT_HASH` at compile time. Shown on the setup screen and serial boot line.
+- **Data freshness**: the center dot changes color (green/amber/red) based on consecutive ADS-B fetch failures. Controlled via `radarDisplaySetFetchFailures()`.
+- **Portal timeout**: `kWifiPortalTimeoutSec` is 300s (5 min). On timeout, the device reboots to retry saved credentials, creating a self-healing loop.
+- **Runway caching**: `runway_overlay.cpp` caches runway screen coordinates in static arrays, rebuilt only when range changes. Avoids per-frame distance/projection math across ~1700 runways.
+- **Persistent TLS**: `adsb_client.cpp` reuses a static `WiFiClientSecure` + `HTTPClient` with `setReuse(true)` to avoid a full TLS handshake every 3s poll.
+- **VLW font pitfall**: any code that calls `tft.setFont()` with a bitmap font replaces the active VLW smooth font. Call `displayFontEnsureLoaded(tft)` before drawing text that expects VLW.
 
 ## Configuration
 
