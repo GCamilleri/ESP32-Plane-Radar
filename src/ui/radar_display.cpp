@@ -10,6 +10,7 @@
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 #include "services/adsb_client.h"
+#include "ui/aircraft_trails.h"
 #include "ui/radar_geo.h"
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
@@ -354,6 +355,49 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   }
 }
 
+void drawTrails() {
+  if (!radar::trailsEnabled()) return;
+
+  const size_t n = trails::trailCount();
+  const auto* all_trails = trails::trails();
+  const int max_r_sq = radar::kGridOuterRadius * radar::kGridOuterRadius;
+
+  for (size_t i = 0; i < n; ++i) {
+    const auto& t = all_trails[i];
+    if (t.count < 2) continue;
+
+    for (uint8_t j = 0; j < t.count; ++j) {
+      // Read in reverse chronological order (most recent = brightest).
+      const uint8_t idx =
+          (t.head + trails::kTrailLength - 1 - j) % trails::kTrailLength;
+      const auto& p = t.points[idx];
+
+      // Skip if outside visible area.
+      if (geo::distSqFromCenter(p.x, p.y) > max_r_sq) continue;
+
+      // Fade: newest = bright, oldest = dim.
+      const float fade =
+          1.0f - (static_cast<float>(j) / static_cast<float>(t.count));
+      const uint8_t alpha = static_cast<uint8_t>(fade * 180.0f);
+
+      // Use aircraft color (red) at varying intensity.
+      uint16_t color;
+      if (config::kDisplayRgbOrder) {
+        color = s_draw->color565(0, 0, alpha);  // BGR: blue channel for red
+      } else {
+        color = s_draw->color565(alpha, 0, 0);
+      }
+
+      const int radius = (j == 0) ? 2 : 1;
+      if (radius > 1) {
+        s_draw->fillCircle(p.x, p.y, radius, color);
+      } else {
+        s_draw->drawPixel(p.x, p.y, color);
+      }
+    }
+  }
+}
+
 struct AircraftDrawItem {
   size_t index = 0;
   int x = 0;
@@ -602,8 +646,8 @@ void renderFrame() {
   drawStaticGrid(s_frame);  // opens its own DrawScope(s_frame)
   {
     const DrawScope scope(s_frame);
+    drawTrails();
     drawAircraft();
-
   }
   s_frame.pushSprite(0, 0);
   tft.setTextDatum(textdatum_t::top_left);
@@ -623,6 +667,7 @@ void radarDisplayDraw() {
   // Fallback when the sprite can't be allocated: draw straight to the panel.
   const DrawScope scope(tft);
   drawStaticGrid(tft);
+  drawTrails();
   drawAircraft();
   tft.setTextDatum(textdatum_t::top_left);
 }
