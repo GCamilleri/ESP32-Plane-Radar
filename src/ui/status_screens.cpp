@@ -13,6 +13,8 @@
 
 namespace {
 
+namespace fonts = lgfx::v1::fonts;
+
 constexpr int kLineGap = 6;
 const int kCenterX = config::kDisplayWidth / 2;
 const int kCenterY = config::kDisplayHeight / 2;

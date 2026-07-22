@@ -38,7 +38,7 @@ float s_cached_outer_km = -1.0f;
 bool s_runway_label_ready = false;
 bool s_runway_label_use_vlw = false;
 float s_runway_label_vlw_size = 0.38f;
-const lgfx::GFXfont* s_runway_label_gfx = &fonts::FreeSansBold12pt7b;
+const lgfx::GFXfont* s_runway_label_gfx = &lgfx::v1::fonts::FreeSansBold12pt7b;
 
 void initRunwayLabelStyle(lgfx::LGFXBase& gfx) {
   if (s_runway_label_ready) {
@@ -50,7 +50,7 @@ void initRunwayLabelStyle(lgfx::LGFXBase& gfx) {
     s_runway_label_use_vlw = true;
     s_runway_label_vlw_size = displayFontFindVlwSizeForHeight(gfx, target);
   } else {
-    s_runway_label_gfx = &fonts::FreeSansBold12pt7b;
+    s_runway_label_gfx = &lgfx::v1::fonts::FreeSansBold12pt7b;
     s_runway_label_use_vlw = false;
   }
   s_runway_label_ready = true;

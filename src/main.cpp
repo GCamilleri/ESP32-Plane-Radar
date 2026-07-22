@@ -20,6 +20,7 @@ bool g_radar_visible = false;
 unsigned long g_wifi_down_since = 0;
 unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_adsb_fetch_ms = 0;
+uint8_t g_consecutive_fetch_failures = 0;
 
 void showRadarIfConnected() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -53,9 +54,15 @@ void fetchAndDrawAircraft() {
   const float fetch_km = ui::radar::fetchRadiusKm();
   if (!services::adsb::fetchUpdate(services::location::lat(),
                                    services::location::lon(), fetch_km)) {
+    if (g_consecutive_fetch_failures < 255) {
+      ++g_consecutive_fetch_failures;
+    }
+    ui::radarDisplaySetFetchFailures(g_consecutive_fetch_failures);
     handleBootButton();
     return;
   }
+  g_consecutive_fetch_failures = 0;
+  ui::radarDisplaySetFetchFailures(0);
   ui::radarDisplayRefreshAircraft();
   handleBootButton();
 }

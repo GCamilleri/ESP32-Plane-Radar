@@ -455,9 +455,10 @@ bool wifiSetupConnect() {
       onStaConnected();
       return true;
     }
-    Serial.println("WiFi connection failed");
-    statusScreenConnectFailed();
-    return false;
+    Serial.println("Portal timed out — rebooting to retry");
+    delay(1000);
+    esp_restart();
+    return false;  // unreachable, satisfies compiler
   }
 
   Serial.println("Connecting to WiFi (portal opens if needed)...");
@@ -483,7 +484,8 @@ bool wifiSetupConnect() {
     return true;
   }
 
-  Serial.println("WiFi connection failed");
-  statusScreenConnectFailed();
-  return false;
+  Serial.println("Portal timed out — rebooting to retry");
+  delay(1000);
+  esp_restart();
+  return false;  // unreachable, satisfies compiler
 }
