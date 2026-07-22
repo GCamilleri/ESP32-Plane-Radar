@@ -17,8 +17,11 @@ constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
 constexpr char kPrefsHeadingKey[] = "heading";
 constexpr char kPrefsLabelModeKey[] = "labels";
+constexpr char kPrefsPollRateKey[] = "pollRate";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
+constexpr unsigned long kPollRatePresetsMs[] = {1000, 3000, 5000, 10000};
+constexpr uint8_t kDefaultPollRateIndex = 1;  // 3s
 
 Preferences s_prefs;
 uint8_t s_range_index = kDefaultRangeIndex;
@@ -26,6 +29,7 @@ bool s_use_miles = false;
 bool s_show_runways = true;
 uint16_t s_heading_deg = 0;
 uint8_t s_label_mode = 0;
+uint8_t s_poll_rate_index = kDefaultPollRateIndex;
 
 template <typename T>
 void nvsPut(const char* ns, const char* key, T value);
@@ -81,6 +85,9 @@ void rangeInit() {
 
   const uint8_t labels = s_prefs.getUChar(kPrefsLabelModeKey, 0);
   s_label_mode = (labels < kLabelModeCount) ? labels : 0;
+
+  const uint8_t poll = s_prefs.getUChar(kPrefsPollRateKey, kDefaultPollRateIndex);
+  s_poll_rate_index = (poll < kPollRatePresetCount) ? poll : kDefaultPollRateIndex;
 
   s_prefs.end();
 }
@@ -176,5 +183,15 @@ void setLabelMode(uint8_t mode) {
   s_label_mode = mode;
   nvsPut<uint8_t>(kPrefsNamespace, kPrefsLabelModeKey, mode);
 }
+
+uint8_t pollRateIndex() { return s_poll_rate_index; }
+
+void setPollRateIndex(uint8_t idx) {
+  if (idx >= kPollRatePresetCount) return;
+  s_poll_rate_index = idx;
+  nvsPut<uint8_t>(kPrefsNamespace, kPrefsPollRateKey, idx);
+}
+
+unsigned long pollRateMs() { return kPollRatePresetsMs[s_poll_rate_index]; }
 
 }  // namespace ui::radar
