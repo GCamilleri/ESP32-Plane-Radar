@@ -528,21 +528,27 @@ void drawCenterDot(int cx, int cy) {
 }
 
 void drawCardinalLabels() {
-  const int cx = radar::kCenterX;
-  const int cy = radar::kCenterY;
-  const int edge = radar::kSize - 1;
-
+  constexpr float kDegToRad = 0.01745329252f;
   constexpr const char* kCardinals[] = {"N", "E", "S", "W"};
-  const uint8_t h = radar::headingIndex();
+  constexpr float kBearings[] = {0.0f, 90.0f, 180.0f, 270.0f};
+  const float heading = radar::headingDeg();
+  const int r = radar::kCenterX - 2;
 
-  drawCardinalLabel(kCardinals[h],
-                    cx, radar::kCardinalNorthOffsetY, textdatum_t::top_center);
-  drawCardinalLabel(kCardinals[(h + 1) % 4],
-                    edge, cy, textdatum_t::middle_right);
-  drawCardinalLabel(kCardinals[(h + 2) % 4],
-                    cx, edge + radar::kCardinalSouthOffsetY, textdatum_t::bottom_center);
-  drawCardinalLabel(kCardinals[(h + 3) % 4],
-                    0, cy, textdatum_t::middle_left);
+  for (int i = 0; i < 4; ++i) {
+    const float rad = (kBearings[i] - heading) * kDegToRad;
+    const float sin_a = sinf(rad);
+    const float cos_a = cosf(rad);
+    const int x = radar::kCenterX + static_cast<int>(lroundf(sin_a * r));
+    const int y = radar::kCenterY - static_cast<int>(lroundf(cos_a * r));
+
+    textdatum_t datum;
+    if (fabsf(sin_a) > fabsf(cos_a)) {
+      datum = sin_a > 0 ? textdatum_t::middle_right : textdatum_t::middle_left;
+    } else {
+      datum = cos_a > 0 ? textdatum_t::top_center : textdatum_t::bottom_center;
+    }
+    drawCardinalLabel(kCardinals[i], x, y, datum);
+  }
 }
 
 int scaleLabelAnchorX(int cx, int outer_radius) {

@@ -5,4 +5,3 @@
 extern LGFX tft;
 
 void displayInit();
-void displayApplySavedBrightness();

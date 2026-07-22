@@ -29,7 +29,7 @@ constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = 40UL;
 /** Taps longer than this are treated as holds, not taps. */
-constexpr unsigned long kBootTapMaxMs = 500UL;
+constexpr unsigned long kBootTapMaxMs = 800UL;
 /** Wait after last tap before reporting gesture (multi-tap detection window). */
 constexpr unsigned long kBootGestureDebounceMs = 400UL;
 /** Hold duration for menu select/back action. */

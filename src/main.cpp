@@ -107,7 +107,6 @@ void setup() {
   }
   services::location::init();
   ui::radar::rangeInit();
-  displayApplySavedBrightness();
   services::adsb::setPollFn(wifiLoop);
 
   if (wifiSetupConnect()) {

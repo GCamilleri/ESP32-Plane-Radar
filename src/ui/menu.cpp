@@ -26,38 +26,53 @@ struct MenuItem {
 };
 
 const char* const kRangeLabels[] = {"5 km", "10 km", "15 km", "25 km"};
-const char* const kBrightnessLabels[] = {"100%", "75%", "50%", "25%", "10%"};
-const char* const kHeadingLabels[] = {"N up", "E up", "S up", "W up"};
 const char* const kLabelModeLabels[] = {"All", "Flight", "None"};
 
 uint8_t getRange() { return radar::rangeIndex(); }
 void setRange(uint8_t v) { radar::setRangeIndex(v); }
 
-uint8_t getBrightness() { return radar::brightnessIndex(); }
-void setBrightness(uint8_t v) {
-  radar::setBrightnessIndex(v);
-  tft.setBrightness(radar::brightnessValue());
-}
-
-uint8_t getHeading() { return radar::headingIndex(); }
-void setHeading(uint8_t v) { radar::setHeadingIndex(v); }
-
 uint8_t getLabelMode() { return radar::labelMode(); }
 void setLabelMode(uint8_t v) { radar::setLabelMode(v); }
 
-constexpr size_t kSettingCount = 4;
+constexpr size_t kHeadingIndex = 1;
+constexpr size_t kSettingCount = 3;
 constexpr size_t kResetWifiIndex = kSettingCount;
 constexpr size_t kMenuItemCount = kSettingCount + 1;
 
 const MenuItem kMenuItems[kSettingCount] = {
     {"Range", radar::kRangePresetCount, kRangeLabels, getRange, setRange},
-    {"Brightness", radar::kBrightnessPresetCount, kBrightnessLabels,
-     getBrightness, setBrightness},
-    {"Heading", radar::kHeadingPresetCount, kHeadingLabels,
-     getHeading, setHeading},
+    {"Heading", 0, nullptr, nullptr, nullptr},
     {"Labels", radar::kLabelModeCount, kLabelModeLabels,
      getLabelMode, setLabelMode},
 };
+
+const char* compassDir(uint16_t deg) {
+  switch (deg) {
+    case 0:   return "N";
+    case 45:  return "NE";
+    case 90:  return "E";
+    case 135: return "SE";
+    case 180: return "S";
+    case 225: return "SW";
+    case 270: return "W";
+    case 315: return "NW";
+    default:  return "";
+  }
+}
+
+char s_heading_buf[12];
+
+const char* headingLabel() {
+  const uint16_t deg = radar::headingDegInt();
+  const char* dir = compassDir(deg);
+  if (dir[0] != '\0') {
+    snprintf(s_heading_buf, sizeof(s_heading_buf), "%u%s %s", deg,
+             "\xC2\xB0", dir);
+  } else {
+    snprintf(s_heading_buf, sizeof(s_heading_buf), "%u%s", deg, "\xC2\xB0");
+  }
+  return s_heading_buf;
+}
 
 State s_state = State::kClosed;
 uint8_t s_cursor = 0;
@@ -144,7 +159,6 @@ void drawMenuScreen() {
 
     tft.drawString(kMenuItems[i].label, cx + kDotOffsetX + 10, y);
 
-    const uint8_t val_idx = kMenuItems[i].get_value();
     if (displayFontIsSmooth()) {
       displayFontSetSmoothSize(tft, 0.72f);
     } else {
@@ -152,7 +166,12 @@ void drawMenuScreen() {
     }
     tft.setTextDatum(textdatum_t::middle_right);
     tft.setTextColor(selected ? s_color_dim : s_color_hint, s_color_bg);
-    tft.drawString(kMenuItems[i].value_labels[val_idx], cx + 62, y);
+    if (i == kHeadingIndex) {
+      tft.drawString(headingLabel(), cx + 62, y);
+    } else {
+      const uint8_t val_idx = kMenuItems[i].get_value();
+      tft.drawString(kMenuItems[i].value_labels[val_idx], cx + 62, y);
+    }
   }
 
   // Hint at bottom
@@ -174,7 +193,6 @@ void drawSettingScreen() {
 
   const int cx = radar::kCenterX;
   const MenuItem& item = kMenuItems[s_cursor];
-  const uint8_t val_idx = item.get_value();
 
   // Setting name
   if (displayFontIsSmooth()) {
@@ -186,29 +204,52 @@ void drawSettingScreen() {
   tft.setTextColor(s_color_ring, s_color_bg);
   tft.drawString(item.label, cx, 62);
 
-  // Current value (large)
-  if (displayFontIsSmooth()) {
-    displayFontSetSmoothSize(tft, 1.2f);
-  } else {
-    tft.setFont(&lgfx::v1::fonts::FreeSansBold18pt7b);
-  }
-  tft.setTextColor(s_color_value, s_color_bg);
-  tft.drawString(item.value_labels[val_idx], cx, 120);
-
-  // Dot indicators
-  constexpr int kDotRadius = 5;
-  constexpr int kDotGap = 16;
-  const int dot_count = item.value_count;
-  const int dots_width = (dot_count - 1) * kDotGap;
-  const int dots_start_x = cx - dots_width / 2;
-  constexpr int kDotsY = 168;
-
-  for (int i = 0; i < dot_count; ++i) {
-    const int dx = dots_start_x + i * kDotGap;
-    if (i == val_idx) {
-      tft.fillSmoothCircle(dx, kDotsY, kDotRadius, s_color_selected);
+  if (s_cursor == kHeadingIndex) {
+    // Heading: show degree and compass direction
+    if (displayFontIsSmooth()) {
+      displayFontSetSmoothSize(tft, 1.2f);
     } else {
-      tft.drawCircle(dx, kDotsY, kDotRadius, s_color_dim);
+      tft.setFont(&lgfx::v1::fonts::FreeSansBold18pt7b);
+    }
+    tft.setTextColor(s_color_value, s_color_bg);
+    tft.drawString(headingLabel(), cx, 115);
+
+    // Compass direction subtitle
+    const char* dir = compassDir(radar::headingDegInt());
+    if (dir[0] != '\0') {
+      if (displayFontIsSmooth()) {
+        displayFontSetSmoothSize(tft, 0.72f);
+      } else {
+        tft.setFont(&lgfx::v1::fonts::FreeSans9pt7b);
+      }
+      tft.setTextColor(s_color_selected, s_color_bg);
+      tft.drawString(dir, cx, 150);
+    }
+  } else {
+    // Generic setting: value + dot indicators
+    const uint8_t val_idx = item.get_value();
+    if (displayFontIsSmooth()) {
+      displayFontSetSmoothSize(tft, 1.2f);
+    } else {
+      tft.setFont(&lgfx::v1::fonts::FreeSansBold18pt7b);
+    }
+    tft.setTextColor(s_color_value, s_color_bg);
+    tft.drawString(item.value_labels[val_idx], cx, 120);
+
+    constexpr int kDotRadius = 5;
+    constexpr int kDotGap = 16;
+    const int dot_count = item.value_count;
+    const int dots_width = (dot_count - 1) * kDotGap;
+    const int dots_start_x = cx - dots_width / 2;
+    constexpr int kDotsY = 168;
+
+    for (int i = 0; i < dot_count; ++i) {
+      const int dx = dots_start_x + i * kDotGap;
+      if (i == val_idx) {
+        tft.fillSmoothCircle(dx, kDotsY, kDotRadius, s_color_selected);
+      } else {
+        tft.drawCircle(dx, kDotsY, kDotRadius, s_color_dim);
+      }
     }
   }
 
@@ -269,9 +310,13 @@ void update() {
       s_cursor = (s_cursor + 1) % kMenuItemCount;
       s_needs_redraw = true;
     } else if (s_state == State::kSetting) {
-      const MenuItem& item = kMenuItems[s_cursor];
-      const uint8_t next = (item.get_value() + 1) % item.value_count;
-      item.set_value(next);
+      if (s_cursor == kHeadingIndex) {
+        radar::headingNext();
+      } else {
+        const MenuItem& item = kMenuItems[s_cursor];
+        const uint8_t next = (item.get_value() + 1) % item.value_count;
+        item.set_value(next);
+      }
       s_needs_redraw = true;
     }
   }

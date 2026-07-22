@@ -56,17 +56,12 @@ void unitsReset();
 uint8_t rangeIndex();
 void setRangeIndex(uint8_t idx);
 
-// --- Display brightness ---
-constexpr uint8_t kBrightnessPresetCount = 5;
-uint8_t brightnessIndex();
-uint8_t brightnessValue();
-void setBrightnessIndex(uint8_t idx);
-
-// --- Heading rotation ---
-constexpr uint8_t kHeadingPresetCount = 4;
-uint8_t headingIndex();
+// --- Heading rotation (15° steps, 0–345) ---
+constexpr uint16_t kHeadingStepDeg = 15;
+uint16_t headingDegInt();
 float headingDeg();
-void setHeadingIndex(uint8_t idx);
+void headingNext();
+void headingSet(uint16_t deg);
 
 // --- Aircraft label mode ---
 constexpr uint8_t kLabelModeCount = 3;
