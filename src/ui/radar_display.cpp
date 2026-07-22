@@ -361,14 +361,17 @@ struct BeyondDotDrawItem {
   int dist_sq = 0;
 };
 
+// Scratch arrays for per-frame draw sorting.  File-scope static keeps ~1.8 KB
+// off the 8 KB Arduino loop stack where deep LovyanGFX draw recursion lives.
+static AircraftDrawItem s_draw_items[services::adsb::kMaxAircraft];
+static BeyondDotDrawItem s_draw_dots[services::adsb::kMaxAircraft];
+
 void drawAircraft() {
   initLabelMetrics();
 
   const size_t n = services::adsb::aircraftCount();
   const services::adsb::Aircraft* planes = services::adsb::aircraftList();
 
-  AircraftDrawItem items[services::adsb::kMaxAircraft];
-  BeyondDotDrawItem dots[services::adsb::kMaxAircraft];
   size_t draw_count = 0;
   size_t dot_count = 0;
 
@@ -382,10 +385,10 @@ void drawAircraft() {
       int x = 0;
       int y = 0;
       geo::latLonToScreen(planes[i].lat, planes[i].lon, &x, &y);
-      items[draw_count].index = i;
-      items[draw_count].x = x;
-      items[draw_count].y = y;
-      items[draw_count].dist_sq = geo::distSqFromCenter(x, y);
+      s_draw_items[draw_count].index = i;
+      s_draw_items[draw_count].x = x;
+      s_draw_items[draw_count].y = y;
+      s_draw_items[draw_count].dist_sq = geo::distSqFromCenter(x, y);
       ++draw_count;
       continue;
     }
@@ -396,35 +399,35 @@ void drawAircraft() {
                                      &dot_y)) {
       continue;
     }
-    dots[dot_count].x = dot_x;
-    dots[dot_count].y = dot_y;
-    dots[dot_count].dist_sq = geo::distSqFromCenter(dot_x, dot_y);
+    s_draw_dots[dot_count].x = dot_x;
+    s_draw_dots[dot_count].y = dot_y;
+    s_draw_dots[dot_count].dist_sq = geo::distSqFromCenter(dot_x, dot_y);
     ++dot_count;
   }
 
-  std::sort(dots, dots + dot_count,
+  std::sort(s_draw_dots, s_draw_dots + dot_count,
             [](const BeyondDotDrawItem& a, const BeyondDotDrawItem& b) {
               return a.dist_sq > b.dist_sq;
             });
   for (size_t d = 0; d < dot_count; ++d) {
-    drawBeyondRingDot(dots[d].x, dots[d].y);
+    drawBeyondRingDot(s_draw_dots[d].x, s_draw_dots[d].y);
   }
 
-  std::sort(items, items + draw_count,
+  std::sort(s_draw_items, s_draw_items + draw_count,
             [](const AircraftDrawItem& a, const AircraftDrawItem& b) {
               return a.dist_sq > b.dist_sq;
             });
   for (size_t d = 0; d < draw_count; ++d) {
-    const size_t i = items[d].index;
-    const int x = items[d].x;
-    const int y = items[d].y;
+    const size_t i = s_draw_items[d].index;
+    const int x = s_draw_items[d].x;
+    const int y = s_draw_items[d].y;
     drawSpeedVector(x, y, planes[i].nose_deg, planes[i].track_deg,
                     planes[i].gs_knots, radar::gColorTrackVector);
     drawHeadingTriangle(x, y, planes[i].nose_deg, radar::gColorAircraft);
   }
   for (size_t d = 0; d < draw_count; ++d) {
-    const size_t i = items[d].index;
-    drawAircraftTag(items[d].x, items[d].y, planes[i]);
+    const size_t i = s_draw_items[d].index;
+    drawAircraftTag(s_draw_items[d].x, s_draw_items[d].y, planes[i]);
   }
 }
 
@@ -570,7 +573,7 @@ void renderFrame() {
 }  // namespace
 
 void radarDisplayDraw() {
-  initPalette();
+  // initPalette() is called inside drawStaticGrid(), no need to repeat here.
   initLabelMetrics();
 
   if (ensureFrameSprite()) {
@@ -586,8 +589,7 @@ void radarDisplayDraw() {
 }
 
 void radarDisplayRefreshAircraft() {
-  initPalette();
-
+  // initPalette() is called inside drawStaticGrid(), no need to repeat here.
   if (ensureFrameSprite()) {
     renderFrame();
     return;
