@@ -13,3 +13,9 @@ void displayFontSetSmoothSize(lgfx::LGFXBase& gfx, float size);
 
 /** Bitmap GFXfont fallback; clears any runtime VLW font on this instance. */
 void displayFontSetBitmap(lgfx::LGFXBase& gfx, const lgfx::GFXfont* font);
+
+/** Measure the font height at a given VLW text size. */
+int displayFontMeasureVlwHeight(lgfx::LGFXBase& gfx, float size);
+
+/** Binary-search for the VLW text size that yields the target pixel height. */
+float displayFontFindVlwSizeForHeight(lgfx::LGFXBase& gfx, int target_px);

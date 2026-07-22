@@ -18,14 +18,14 @@
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
 
-portMUX_TYPE s_boot_mux = portMUX_INITIALIZER_UNLOCKED;
-volatile bool s_boot_tap_pending = false;
-volatile bool s_boot_is_down = false;
-volatile unsigned long s_boot_down_ms = 0;
-bool s_long_press_handled = false;
-bool s_boot_interrupt_attached = false;
+static portMUX_TYPE s_boot_mux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool s_boot_tap_pending = false;
+static volatile bool s_boot_is_down = false;
+static volatile unsigned long s_boot_down_ms = 0;
+static bool s_long_press_handled = false;
+static bool s_boot_interrupt_attached = false;
 
-void IRAM_ATTR onBootButtonIsr() {
+static void IRAM_ATTR onBootButtonIsr() {
   const bool down = digitalRead(config::kBootPin) == LOW;
   const unsigned long now = millis();
   portENTER_CRITICAL_ISR(&s_boot_mux);
@@ -42,7 +42,7 @@ void IRAM_ATTR onBootButtonIsr() {
   portEXIT_CRITICAL_ISR(&s_boot_mux);
 }
 
-void initBootButton() {
+static void initBootButton() {
   pinMode(config::kBootPin, INPUT_PULLUP);
   if (s_boot_interrupt_attached) {
     return;
@@ -329,6 +329,12 @@ bool connectSavedNetwork(bool show_ui) {
   return tryConnectWithUi(ssid, pass, show_ui);
 }
 
+void onStaConnected() {
+  WiFi.setAutoReconnect(true);
+  Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
+                WiFi.localIP().toString().c_str());
+}
+
 bool openConfigPortal() {
   stopLanWebPortal();
   WiFi.disconnect(true);
@@ -446,9 +452,7 @@ bool wifiSetupConnect() {
   if (force_portal) {
     Serial.println("Opening WiFi setup portal (after reset)");
     if (openConfigPortal() && wifiLinkUp()) {
-      WiFi.setAutoReconnect(true);
-      Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
-                    WiFi.localIP().toString().c_str());
+      onStaConnected();
       return true;
     }
     Serial.println("WiFi connection failed");
@@ -459,16 +463,12 @@ bool wifiSetupConnect() {
   Serial.println("Connecting to WiFi (portal opens if needed)...");
 
   if (wifiLinkUp()) {
-    WiFi.setAutoReconnect(true);
-    Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
-                  WiFi.localIP().toString().c_str());
+    onStaConnected();
     return true;
   }
 
   if (storedWifiCredentials() && connectSavedNetwork(true)) {
-    WiFi.setAutoReconnect(true);
-    Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
-                  WiFi.localIP().toString().c_str());
+    onStaConnected();
     return true;
   }
 
@@ -479,9 +479,7 @@ bool wifiSetupConnect() {
   }
 
   if (openConfigPortal() && wifiLinkUp()) {
-    WiFi.setAutoReconnect(true);
-    Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
-                  WiFi.localIP().toString().c_str());
+    onStaConnected();
     return true;
   }
 

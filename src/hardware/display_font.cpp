@@ -55,3 +55,22 @@ void displayFontSetBitmap(lgfx::LGFXBase& gfx, const lgfx::GFXfont* font) {
   gfx.setFont(font);
   gfx.setTextSize(1);
 }
+
+int displayFontMeasureVlwHeight(lgfx::LGFXBase& gfx, float size) {
+  gfx.setTextSize(size);
+  return gfx.fontHeight();
+}
+
+float displayFontFindVlwSizeForHeight(lgfx::LGFXBase& gfx, int target_px) {
+  float lo = 0.25f;
+  float hi = 1.2f;
+  for (int i = 0; i < 16; ++i) {
+    const float mid = (lo + hi) * 0.5f;
+    if (displayFontMeasureVlwHeight(gfx, mid) < target_px) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  return hi;
+}
