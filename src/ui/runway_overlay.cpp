@@ -232,7 +232,7 @@ void rebuildRunwayCache(lgfx::LGFXBase& gfx) {
       const auto& ap = data::large_airports::kAirports[ap_idx];
       int ax = 0;
       int ay = 0;
-      latLonToScreen(e7ToDeg(ap.lat_e7), e7ToDeg(ap.lon_e7), &ax, &ay);
+      geo::latLonToScreen(e7ToDeg(ap.lat_e7), e7ToDeg(ap.lon_e7), &ax, &ay);
       clipPointOntoOuterRing(&ax, &ay);
       int lx = 0;
       int ly = 0;
