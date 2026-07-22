@@ -49,7 +49,7 @@ constexpr float kAircraftTrackLineHalfWidth = 1.0f;
 constexpr float kRunwayLineWidthPx = 2.0f;
 constexpr float kRunwayLineHalfWidth = kRunwayLineWidthPx * 0.5f;
 constexpr int kRunwayLabelHeightPx = kCardinalLabelHeightPx;
-constexpr int kRunwayLabelGapPx = 3;
+constexpr int kRunwayLabelGapPx = 12;
 /** Gap from triangle edge to tag block (px). */
 constexpr int kAircraftLabelGapPx = 1;
 /** Keep symbol centroid inside outer ring by at least this inset (px). */
