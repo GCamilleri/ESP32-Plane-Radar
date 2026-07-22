@@ -89,15 +89,15 @@ constexpr uint8_t kRunwayLabelR = 110;
 constexpr uint8_t kRunwayLabelG = 210;
 constexpr uint8_t kRunwayLabelB = 230;
 
-extern uint16_t kColorBackground;
-extern uint16_t kColorGrid;
-extern uint16_t kColorLabel;
-extern uint16_t kColorCenter;
-extern uint16_t kColorAircraft;
-extern uint16_t kColorTrackVector;
-extern uint16_t kColorTagType;
-extern uint16_t kColorTagAltitude;
-extern uint16_t kColorRunway;
-extern uint16_t kColorRunwayLabel;
+extern uint16_t gColorBackground;
+extern uint16_t gColorGrid;
+extern uint16_t gColorLabel;
+extern uint16_t gColorCenter;
+extern uint16_t gColorAircraft;
+extern uint16_t gColorTrackVector;
+extern uint16_t gColorTagType;
+extern uint16_t gColorTagAltitude;
+extern uint16_t gColorRunway;
+extern uint16_t gColorRunwayLabel;
 
 }  // namespace ui::radar
