@@ -68,4 +68,13 @@ constexpr uint8_t kLabelModeCount = 3;
 uint8_t labelMode();
 void setLabelMode(uint8_t mode);
 
+// --- Runway/airport display mode ---
+// 0 = Off, 1 = Large only, 2 = Large + Medium
+constexpr uint8_t kRunwayModeOff = 0;
+constexpr uint8_t kRunwayModeLarge = 1;
+constexpr uint8_t kRunwayModeAll = 2;
+constexpr uint8_t kRunwayModeCount = 3;
+uint8_t runwayMode();
+void setRunwayMode(uint8_t mode);
+
 }  // namespace ui::radar

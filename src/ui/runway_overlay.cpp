@@ -3,8 +3,9 @@
 #include <lgfx/v1/lgfx_fonts.hpp>
 
 #include <cmath>
+#include <cstring>
 
-#include "data/large_airports.h"
+#include "data/airports.h"
 #include "hardware/display_font.h"
 #include "ui/radar_geo.h"
 #include "ui/radar_range.h"
@@ -13,20 +14,27 @@
 namespace ui::runway {
 namespace {
 
-constexpr size_t kMaxAirportLabels = 32;
-constexpr size_t kMaxCachedSegments = 64;
+constexpr size_t kMaxAirportLabels = 64;
+constexpr size_t kMaxCachedSegments = 192;
 
-bool s_in_range[data::large_airports::kAirportCount];
-bool s_label_pending[data::large_airports::kAirportCount];
+// Largest airport count across any single tier (medium = 3801).  The per-tier
+// distance/label tracking arrays are sized to this so a single pair of static
+// buffers can be reused for each tier in turn.
+constexpr size_t kMaxTierAirports = 4096;
 
-// Cached runway screen coordinates.  Recomputed only when the range preset
-// changes (detected by comparing outer_km).  Location only changes on reboot
-// so it does not need to be tracked here.
+bool s_in_range[kMaxTierAirports];
+bool s_label_pending[kMaxTierAirports];
+
+// Cached runway screen coordinates.  Recomputed only when the range preset,
+// heading, or runway mode changes.  Location only changes on reboot so it does
+// not need to be tracked here.
 struct CachedRunwaySegment {
   int16_t x0, y0, x1, y1;
 };
 struct CachedLabel {
-  uint16_t airport_idx;
+  // Airport ident copied directly so labels are tier-agnostic (airport indices
+  // are only unique within a tier).
+  char ident[5];
   int16_t x, y;
 };
 CachedRunwaySegment s_cached_segments[kMaxCachedSegments];
@@ -35,6 +43,7 @@ CachedLabel s_cached_labels[kMaxAirportLabels];
 size_t s_cached_label_count = 0;
 float s_cached_outer_km = -1.0f;
 float s_cached_heading_deg = -1.0f;
+uint8_t s_cached_runway_mode = 0xFF;
 
 bool s_runway_label_ready = false;
 bool s_runway_label_use_vlw = false;
@@ -117,7 +126,7 @@ void drawBoldRunwayLabel(lgfx::LGFXBase& gfx, const char* ident, int mx, int my)
 /** Compute the clipped screen segment for a runway.  Returns false if the
  *  runway does not intersect the visible disc.  On success, stores the
  *  clipped endpoints in *out. */
-bool computeRunwaySegment(const data::large_airports::Runway& rw,
+bool computeRunwaySegment(const data::airports::Runway& rw,
                           CachedRunwaySegment* out) {
   const float le_lat = e7ToDeg(rw.le_lat_e7);
   const float le_lon = e7ToDeg(rw.le_lon_e7);
@@ -181,7 +190,7 @@ void clipPointOntoOuterRing(int* x, int* y) {
 }
 
 void drawAirportLabel(lgfx::LGFXBase& gfx,
-                      const data::large_airports::Airport& ap) {
+                      const data::airports::Airport& ap) {
   int ax = 0;
   int ay = 0;
   geo::latLonToScreen(e7ToDeg(ap.lat_e7), e7ToDeg(ap.lon_e7), &ax, &ay);
@@ -193,26 +202,34 @@ void drawAirportLabel(lgfx::LGFXBase& gfx,
   drawBoldRunwayLabel(gfx, ap.ident, lx, ly);
 }
 
-void rebuildRunwayCache(lgfx::LGFXBase& gfx) {
-  const float radius_km = radar::fetchRadiusKm();
-  s_cached_segment_count = 0;
-  s_cached_label_count = 0;
-
-  for (size_t i = 0; i < data::large_airports::kAirportCount; ++i) {
+/** Cache runway segments and airport labels for a single tier.  Appends to the
+ *  shared s_cached_* arrays.  s_in_range/s_label_pending are per-airport-index
+ *  scratch, reset here for this tier's airport range. */
+void cacheRunwaysForTier(float radius_km,
+                         const data::airports::Airport* airports,
+                         size_t airport_count,
+                         const data::airports::Runway* runways,
+                         size_t runway_count) {
+  const size_t tracked =
+      (airport_count < kMaxTierAirports) ? airport_count : kMaxTierAirports;
+  for (size_t i = 0; i < tracked; ++i) {
     s_in_range[i] = false;
     s_label_pending[i] = false;
   }
 
-  for (size_t i = 0; i < data::large_airports::kRunwayCount; ++i) {
-    const auto& rw = data::large_airports::kRunways[i];
+  for (size_t i = 0; i < runway_count; ++i) {
+    const auto& rw = runways[i];
     const uint16_t ap_idx = rw.airport_idx;
+    if (ap_idx >= tracked) {
+      continue;  // Defensive: index outside this tier's airport table.
+    }
     if (!s_in_range[ap_idx]) {
-      const auto& ap = data::large_airports::kAirports[ap_idx];
+      const auto& ap = airports[ap_idx];
       float dx_km = 0.0f;
       float dy_km = 0.0f;
       float dist_km = 0.0f;
       geo::offsetKmFromCenter(e7ToDeg(ap.lat_e7), e7ToDeg(ap.lon_e7), &dx_km,
-                         &dy_km, &dist_km);
+                              &dy_km, &dist_km);
       s_in_range[ap_idx] = (dist_km <= radius_km);
     }
     if (!s_in_range[ap_idx]) {
@@ -230,7 +247,7 @@ void rebuildRunwayCache(lgfx::LGFXBase& gfx) {
     if (!s_label_pending[ap_idx] &&
         s_cached_label_count < kMaxAirportLabels) {
       s_label_pending[ap_idx] = true;
-      const auto& ap = data::large_airports::kAirports[ap_idx];
+      const auto& ap = airports[ap_idx];
       int ax = 0;
       int ay = 0;
       geo::latLonToScreen(e7ToDeg(ap.lat_e7), e7ToDeg(ap.lon_e7), &ax, &ay);
@@ -238,20 +255,42 @@ void rebuildRunwayCache(lgfx::LGFXBase& gfx) {
       int lx = 0;
       int ly = 0;
       offsetLabelFromCenter(ax, ay, &lx, &ly);
-      s_cached_labels[s_cached_label_count].airport_idx = ap_idx;
+      memcpy(s_cached_labels[s_cached_label_count].ident, ap.ident,
+             sizeof(ap.ident));
       s_cached_labels[s_cached_label_count].x = static_cast<int16_t>(lx);
       s_cached_labels[s_cached_label_count].y = static_cast<int16_t>(ly);
       ++s_cached_label_count;
     }
   }
+}
+
+void rebuildRunwayCache() {
+  const float radius_km = radar::fetchRadiusKm();
+  s_cached_segment_count = 0;
+  s_cached_label_count = 0;
+
+  // Large airports are always shown when the overlay is enabled.
+  cacheRunwaysForTier(radius_km, data::airports::large::kAirports,
+                      data::airports::large::kAirportCount,
+                      data::airports::large::kRunways,
+                      data::airports::large::kRunwayCount);
+
+  // Medium airports only in the "All" mode.
+  if (radar::runwayMode() >= radar::kRunwayModeAll) {
+    cacheRunwaysForTier(radius_km, data::airports::medium::kAirports,
+                        data::airports::medium::kAirportCount,
+                        data::airports::medium::kRunways,
+                        data::airports::medium::kRunwayCount);
+  }
 
   s_cached_outer_km = radar::rangeCurrent().outer_km;
   s_cached_heading_deg = radar::headingDeg();
+  s_cached_runway_mode = radar::runwayMode();
 }
 
 }  // namespace
 
-void drawLargeAirportRunways(lgfx::LGFXBase& gfx) {
+void drawAirportRunways(lgfx::LGFXBase& gfx) {
   if (!radar::showRunways()) {
     return;
   }
@@ -259,9 +298,11 @@ void drawLargeAirportRunways(lgfx::LGFXBase& gfx) {
 
   const float current_outer_km = radar::rangeCurrent().outer_km;
   const float current_heading = radar::headingDeg();
+  const uint8_t current_mode = radar::runwayMode();
   if (s_cached_outer_km != current_outer_km ||
-      s_cached_heading_deg != current_heading) {
-    rebuildRunwayCache(gfx);
+      s_cached_heading_deg != current_heading ||
+      s_cached_runway_mode != current_mode) {
+    rebuildRunwayCache();
   }
 
   // Replay cached segments.
@@ -277,10 +318,7 @@ void drawLargeAirportRunways(lgfx::LGFXBase& gfx) {
   applyRunwayLabelStyle(gfx);
   for (size_t i = 0; i < s_cached_label_count; ++i) {
     const auto& cl = s_cached_labels[i];
-    drawBoldRunwayLabel(
-        gfx,
-        data::large_airports::kAirports[cl.airport_idx].ident,
-        cl.x, cl.y);
+    drawBoldRunwayLabel(gfx, cl.ident, cl.x, cl.y);
   }
 }
 

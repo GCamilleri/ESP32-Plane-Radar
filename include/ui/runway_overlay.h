@@ -4,6 +4,6 @@
 
 namespace ui::runway {
 
-void drawLargeAirportRunways(lgfx::LGFXBase& gfx);
+void drawAirportRunways(lgfx::LGFXBase& gfx);
 
 }  // namespace ui::runway
