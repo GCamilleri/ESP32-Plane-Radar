@@ -74,8 +74,10 @@ float e7ToDeg(int32_t e7) { return static_cast<float>(e7) * 1e-7f; }
 
 void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
                         float* dist_km) {
+  const float cos_lat =
+      cosf(static_cast<float>(services::location::lat()) * 0.01745329252f);
   *dx_km =
-      static_cast<float>(lon - services::location::lon()) * kKmPerDeg;
+      static_cast<float>(lon - services::location::lon()) * kKmPerDeg * cos_lat;
   *dy_km =
       static_cast<float>(lat - services::location::lat()) * kKmPerDeg;
   *dist_km = sqrtf((*dx_km) * (*dx_km) + (*dy_km) * (*dy_km));

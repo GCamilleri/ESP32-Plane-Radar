@@ -19,7 +19,7 @@
 #include "ui/status_screens.h"
 
 portMUX_TYPE s_boot_mux = portMUX_INITIALIZER_UNLOCKED;
-volatile bool s_boot_tap_pending = false;
+volatile uint8_t s_boot_tap_count = 0;
 volatile bool s_boot_is_down = false;
 volatile unsigned long s_boot_down_ms = 0;
 bool s_long_press_handled = false;
@@ -35,7 +35,7 @@ void IRAM_ATTR onBootButtonIsr() {
   } else if (s_boot_is_down) {
     const unsigned long held = now - s_boot_down_ms;
     if (held >= config::kBootTapMinMs && held < config::kBootResetHoldMs) {
-      s_boot_tap_pending = true;
+      ++s_boot_tap_count;
     }
     s_boot_is_down = false;
   }
@@ -274,8 +274,8 @@ void startStaConnect(const String& ssid, const String& pass) {
 }
 
 bool waitForLinkWithUi(const char* ssid_for_ui, unsigned long attempt_ms) {
-  const unsigned long deadline = millis() + attempt_ms;
-  while (millis() < deadline) {
+  const unsigned long start = millis();
+  while (millis() - start < attempt_ms) {
     if (wifiLinkUp()) {
       return true;
     }
@@ -370,9 +370,9 @@ void bootButtonInit() { initBootButton(); }
 
 bool bootButtonConsumeTap() {
   portENTER_CRITICAL(&s_boot_mux);
-  const bool tap = s_boot_tap_pending;
+  const bool tap = s_boot_tap_count > 0;
   if (tap) {
-    s_boot_tap_pending = false;
+    --s_boot_tap_count;
   }
   portEXIT_CRITICAL(&s_boot_mux);
   return tap;
