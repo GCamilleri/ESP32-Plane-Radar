@@ -3,6 +3,7 @@
 #include <lgfx/v1/lgfx_fonts.hpp>
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstdlib>
 
@@ -372,6 +373,147 @@ struct BeyondDotDrawItem {
 static AircraftDrawItem s_draw_items[services::adsb::kMaxAircraft];
 static BeyondDotDrawItem s_draw_dots[services::adsb::kMaxAircraft];
 
+struct LabelPlacement {
+  int16_t x, y, w, h;   // bounding box of placed label
+  bool on_right;         // true = left-aligned text, false = right-aligned
+  uint8_t src_draw_idx;  // index into s_draw_items
+};
+static LabelPlacement s_label_placements[services::adsb::kMaxAircraft];
+static size_t s_label_count = 0;
+
+int overlapArea(int16_t ax, int16_t ay, int16_t aw, int16_t ah,
+                int16_t bx, int16_t by, int16_t bw, int16_t bh) {
+  const int ox = std::max(0, std::min(ax + aw, bx + bw) - std::max(ax, bx));
+  const int oy = std::max(0, std::min(ay + ah, by + bh) - std::max(ay, by));
+  return ox * oy;
+}
+
+void resolveLabels(size_t draw_count) {
+  s_label_count = 0;
+  const uint8_t lbl_mode = radar::labelMode();
+  if (lbl_mode >= 2) return;
+
+  initTagLabelMetrics();
+  applyTagStyle();
+
+  const int line_h = s_draw->fontHeight();
+  const int line_count = (lbl_mode == 0) ? 3 : 1;
+  const int block_h = line_h * line_count;
+  const int symbol_half = radar::kAircraftNoseLenPx + radar::kAircraftTailHalfPx;
+  const int gap = radar::kAircraftLabelGapPx;
+
+  const services::adsb::Aircraft* planes = services::adsb::aircraftList();
+
+  // Process closest-to-center first (end of s_draw_items, which is sorted
+  // farthest-first).  Closer aircraft get label-position priority.
+  for (int d = static_cast<int>(draw_count) - 1; d >= 0; --d) {
+    const size_t i = s_draw_items[d].index;
+    const int ax = s_draw_items[d].x;
+    const int ay = s_draw_items[d].y;
+
+    const int block_w = measureTagBlockWidth(planes[i]);
+    if (block_w <= 0) continue;
+
+    // 4 candidate positions: right, left, above, below
+    struct Candidate {
+      int16_t x, y;
+      bool on_right;
+    };
+
+    const Candidate candidates[4] = {
+        // Right of symbol
+        {static_cast<int16_t>(ax + symbol_half + gap),
+         static_cast<int16_t>(ay - block_h / 2), true},
+        // Left of symbol
+        {static_cast<int16_t>(ax - symbol_half - gap - block_w),
+         static_cast<int16_t>(ay - block_h / 2), false},
+        // Above symbol
+        {static_cast<int16_t>(ax - block_w / 2),
+         static_cast<int16_t>(ay - symbol_half - gap - block_h), true},
+        // Below symbol
+        {static_cast<int16_t>(ax - block_w / 2),
+         static_cast<int16_t>(ay + symbol_half + gap), true},
+    };
+
+    int best_candidate = 0;
+    int best_overlap = INT32_MAX;
+
+    for (int c = 0; c < 4; ++c) {
+      int total_overlap = 0;
+      for (size_t p = 0; p < s_label_count; ++p) {
+        total_overlap += overlapArea(
+            candidates[c].x, candidates[c].y,
+            static_cast<int16_t>(block_w), static_cast<int16_t>(block_h),
+            s_label_placements[p].x, s_label_placements[p].y,
+            s_label_placements[p].w, s_label_placements[p].h);
+      }
+      if (total_overlap == 0) {
+        best_candidate = c;
+        break;
+      }
+      if (total_overlap < best_overlap) {
+        best_overlap = total_overlap;
+        best_candidate = c;
+      }
+    }
+
+    auto& placement = s_label_placements[s_label_count];
+    placement.x = candidates[best_candidate].x;
+    placement.y = candidates[best_candidate].y;
+    placement.w = static_cast<int16_t>(block_w);
+    placement.h = static_cast<int16_t>(block_h);
+    placement.on_right = candidates[best_candidate].on_right;
+    placement.src_draw_idx = static_cast<uint8_t>(d);
+
+    // Clamp to screen bounds
+    placement.x = static_cast<int16_t>(
+        std::max(1, std::min(static_cast<int>(placement.x),
+                             radar::kSize - block_w - 1)));
+    placement.y = static_cast<int16_t>(
+        std::max(1, std::min(static_cast<int>(placement.y),
+                             radar::kSize - block_h - 1)));
+
+    ++s_label_count;
+  }
+}
+
+void drawAircraftTagPlaced(const LabelPlacement& place,
+                           const services::adsb::Aircraft& plane) {
+  initTagLabelMetrics();
+  applyTagStyle();
+
+  const uint8_t lbl_mode = radar::labelMode();
+  const int line_h = s_draw->fontHeight();
+  int ly = place.y;
+
+  int anchor_x;
+  if (place.on_right) {
+    anchor_x = place.x;
+    s_draw->setTextDatum(textdatum_t::top_left);
+  } else {
+    anchor_x = place.x + place.w;
+    s_draw->setTextDatum(textdatum_t::top_right);
+  }
+
+  if (plane.callsign[0] != '\0') {
+    s_draw->setTextColor(radar::gColorLabel, radar::gColorBackground);
+    s_draw->drawString(plane.callsign, anchor_x, ly);
+  }
+  if (lbl_mode != 0) return;
+  ly += line_h;
+
+  if (plane.type[0] != '\0') {
+    s_draw->setTextColor(radar::gColorTagType, radar::gColorBackground);
+    s_draw->drawString(plane.type, anchor_x, ly);
+  }
+  ly += line_h;
+
+  if (plane.alt[0] != '\0') {
+    s_draw->setTextColor(radar::gColorTagAltitude, radar::gColorBackground);
+    s_draw->drawString(plane.alt, anchor_x, ly);
+  }
+}
+
 void drawAircraft() {
   initLabelMetrics();
 
@@ -436,9 +578,11 @@ void drawAircraft() {
   }
   const uint8_t lbl_mode = radar::labelMode();
   if (lbl_mode < 2) {
-    for (size_t d = 0; d < draw_count; ++d) {
+    resolveLabels(draw_count);
+    for (size_t p = 0; p < s_label_count; ++p) {
+      const size_t d = s_label_placements[p].src_draw_idx;
       const size_t i = s_draw_items[d].index;
-      drawAircraftTag(s_draw_items[d].x, s_draw_items[d].y, planes[i]);
+      drawAircraftTagPlaced(s_label_placements[p], planes[i]);
     }
   }
 }
