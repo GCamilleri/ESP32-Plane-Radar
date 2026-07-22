@@ -5,6 +5,10 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
+#ifndef BUILD_GIT_HASH
+#define BUILD_GIT_HASH "dev"
+#endif
+
 #include "config.h"
 #include "hardware/display.h"
 #include "services/adsb_client.h"
@@ -73,7 +77,7 @@ void setup() {
   Serial.begin(115200);
   delay(500);
   Serial.println();
-  Serial.println("Plane Radar");
+  Serial.printf("Plane Radar [%s]\n", BUILD_GIT_HASH);
 
   bootButtonInit();
   displayInit();

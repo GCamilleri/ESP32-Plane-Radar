@@ -11,6 +11,10 @@
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 
+#ifndef BUILD_GIT_HASH
+#define BUILD_GIT_HASH "dev"
+#endif
+
 namespace {
 
 namespace fonts = lgfx::v1::fonts;
@@ -71,6 +75,7 @@ void applyLineStyle(const TextLine& line) {
 }
 
 void drawTextBlock(uint16_t bg, uint16_t fg, const TextLine* lines, size_t count) {
+  displayFontEnsureLoaded(tft);
   tft.fillScreen(bg);
   tft.setTextColor(fg, bg);
   tft.setTextDatum(textdatum_t::middle_center);
@@ -219,6 +224,11 @@ void statusScreenPortal() {
   };
   drawTextBlock(config::kColorYellow, config::kTextOnYellow, lines,
                 sizeof(lines) / sizeof(lines[0]));
+
+  tft.setTextDatum(textdatum_t::bottom_center);
+  tft.setTextColor(tft.color565(80, 80, 80), config::kColorYellow);
+  tft.setFont(&kGfxDetail);
+  tft.drawString(BUILD_GIT_HASH, kCenterX, config::kDisplayHeight - 4);
 }
 
 void statusScreenConnectFailed() {
