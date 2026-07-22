@@ -22,6 +22,37 @@ Aircraft s_aircraft[kMaxAircraft];
 size_t s_aircraft_count = 0;
 PollFn s_poll_fn = nullptr;
 
+// Persistent TLS connection -- avoids a full handshake every poll cycle.
+WiFiClientSecure s_tls_client;
+HTTPClient s_http;
+bool s_http_initialized = false;
+
+// ArduinoJson filter -- parse only the fields we actually consume.
+JsonDocument s_json_filter;
+bool s_filter_initialized = false;
+
+void initJsonFilter() {
+  if (s_filter_initialized) {
+    return;
+  }
+  JsonObject ac_filter = s_json_filter["ac"][0].to<JsonObject>();
+  ac_filter["lat"] = true;
+  ac_filter["lon"] = true;
+  ac_filter["flight"] = true;
+  ac_filter["hex"] = true;
+  ac_filter["t"] = true;
+  ac_filter["alt_baro"] = true;
+  ac_filter["alt_geom"] = true;
+  ac_filter["gs"] = true;
+  ac_filter["tas"] = true;
+  ac_filter["ias"] = true;
+  ac_filter["track"] = true;
+  ac_filter["true_heading"] = true;
+  ac_filter["mag_heading"] = true;
+  ac_filter["dir"] = true;
+  s_filter_initialized = true;
+}
+
 void pollNetwork() {
   if (s_poll_fn != nullptr) {
     s_poll_fn();
@@ -208,40 +239,44 @@ const Aircraft* aircraftList() { return s_aircraft; }
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
 
-  String url = kApiBase;
-  url += String(center_lat, 6);
-  url += "/lon/";
-  url += String(center_lon, 6);
-  url += "/dist/";
-  url += String(dist_nm, 1);
+  // Fixed buffer URL instead of heap-allocating String fragments.
+  char url[128];
+  snprintf(url, sizeof(url), "%s%.6f/lon/%.6f/dist/%.1f",
+           kApiBase, center_lat, center_lon, static_cast<double>(dist_nm));
 
-  WiFiClientSecure client;
-  client.setInsecure();
+  // Reuse persistent TLS client to keep the session across polls.
+  if (!s_http_initialized) {
+    s_tls_client.setInsecure();
+    s_http.setReuse(true);
+    s_http_initialized = true;
+  }
 
-  HTTPClient http;
-  if (!http.begin(client, url)) {
+  if (!s_http.begin(s_tls_client, url)) {
     Serial.println("adsb: http.begin failed");
     return false;
   }
 
-  http.setTimeout(kRequestTimeoutMs);
-  const int code = performGetWithPoll(http);
+  s_http.setTimeout(kRequestTimeoutMs);
+  const int code = performGetWithPoll(s_http);
   if (code != HTTP_CODE_OK) {
     Serial.printf("adsb: HTTP %d\n", code);
-    http.end();
+    s_http.end();
     return false;
   }
 
   String payload;
-  if (!readResponseBodyWithPoll(http, payload)) {
+  if (!readResponseBodyWithPoll(s_http, payload)) {
     Serial.println("adsb: empty response");
-    http.end();
+    s_http.end();
     return false;
   }
-  http.end();
 
+  // Do NOT call s_http.end() on success -- let keep-alive hold the connection.
+
+  initJsonFilter();
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, payload);
+  const DeserializationError err =
+      deserializeJson(doc, payload, DeserializationOption::Filter(s_json_filter));
   if (err) {
     Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
     return false;
