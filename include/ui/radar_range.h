@@ -68,4 +68,8 @@ constexpr uint8_t kLabelModeCount = 3;
 uint8_t labelMode();
 void setLabelMode(uint8_t mode);
 
+// --- Sweep line ---
+bool sweepEnabled();
+void setSweepEnabled(bool enabled);
+
 }  // namespace ui::radar

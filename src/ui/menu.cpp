@@ -27,6 +27,7 @@ struct MenuItem {
 
 const char* const kRangeLabels[] = {"5 km", "10 km", "15 km", "25 km"};
 const char* const kLabelModeLabels[] = {"All", "Flight", "None"};
+const char* const kSweepLabels[] = {"Off", "On"};
 
 uint8_t getRange() { return radar::rangeIndex(); }
 void setRange(uint8_t v) { radar::setRangeIndex(v); }
@@ -34,8 +35,11 @@ void setRange(uint8_t v) { radar::setRangeIndex(v); }
 uint8_t getLabelMode() { return radar::labelMode(); }
 void setLabelMode(uint8_t v) { radar::setLabelMode(v); }
 
+uint8_t getSweep() { return radar::sweepEnabled() ? 1 : 0; }
+void setSweep(uint8_t v) { radar::setSweepEnabled(v == 1); }
+
 constexpr size_t kHeadingIndex = 1;
-constexpr size_t kSettingCount = 3;
+constexpr size_t kSettingCount = 4;
 constexpr size_t kResetWifiIndex = kSettingCount;
 constexpr size_t kMenuItemCount = kSettingCount + 1;
 
@@ -44,6 +48,7 @@ const MenuItem kMenuItems[kSettingCount] = {
     {"Heading", 0, nullptr, nullptr, nullptr},
     {"Labels", radar::kLabelModeCount, kLabelModeLabels,
      getLabelMode, setLabelMode},
+    {"Sweep", 2, kSweepLabels, getSweep, setSweep},
 };
 
 const char* compassDir(uint16_t deg) {

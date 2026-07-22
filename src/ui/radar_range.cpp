@@ -17,6 +17,7 @@ constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
 constexpr char kPrefsHeadingKey[] = "heading";
 constexpr char kPrefsLabelModeKey[] = "labels";
+constexpr char kPrefsSweepKey[] = "sweep";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
 
@@ -26,6 +27,7 @@ bool s_use_miles = false;
 bool s_show_runways = true;
 uint16_t s_heading_deg = 0;
 uint8_t s_label_mode = 0;
+bool s_sweep_enabled = true;
 
 template <typename T>
 void nvsPut(const char* ns, const char* key, T value);
@@ -81,6 +83,8 @@ void rangeInit() {
 
   const uint8_t labels = s_prefs.getUChar(kPrefsLabelModeKey, 0);
   s_label_mode = (labels < kLabelModeCount) ? labels : 0;
+
+  s_sweep_enabled = s_prefs.getBool(kPrefsSweepKey, true);
 
   s_prefs.end();
 }
@@ -175,6 +179,13 @@ void setLabelMode(uint8_t mode) {
   if (mode >= kLabelModeCount) return;
   s_label_mode = mode;
   nvsPut<uint8_t>(kPrefsNamespace, kPrefsLabelModeKey, mode);
+}
+
+bool sweepEnabled() { return s_sweep_enabled; }
+
+void setSweepEnabled(bool enabled) {
+  s_sweep_enabled = enabled;
+  nvsPut<bool>(kPrefsNamespace, kPrefsSweepKey, enabled);
 }
 
 }  // namespace ui::radar
