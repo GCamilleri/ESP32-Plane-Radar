@@ -78,4 +78,8 @@ unsigned long pollRateMs();
 bool sweepEnabled();
 void setSweepEnabled(bool enabled);
 
+// --- Trails ---
+bool trailsEnabled();
+void setTrailsEnabled(bool enabled);
+
 }  // namespace ui::radar

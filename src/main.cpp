@@ -14,6 +14,7 @@
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
 #include "services/wifi_setup.h"
+#include "ui/aircraft_trails.h"
 #include "ui/menu.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
@@ -86,6 +87,7 @@ void fetchAndDrawAircraft() {
   }
   g_consecutive_fetch_failures = 0;
   ui::radarDisplaySetFetchFailures(0);
+  ui::trails::recordPositions();
   if (!ui::menu::isOpen()) {
     ui::radarDisplayRefreshAircraft();
   }
@@ -107,6 +109,7 @@ void setup() {
   }
   services::location::init();
   ui::radar::rangeInit();
+  ui::trails::setEnabled(ui::radar::trailsEnabled());
   services::adsb::setPollFn(wifiLoop);
 
   if (wifiSetupConnect()) {
