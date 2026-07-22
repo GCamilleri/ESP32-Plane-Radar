@@ -58,7 +58,7 @@ constexpr bool kDisplayRgbOrder = true;
 constexpr double kDefaultRadarLat = 52.3676;
 constexpr double kDefaultRadarLon = 4.9041;
 
-/** Poll adsb.fi (API public limit: 1 req/s). */
+/** Default poll interval (ms). Runtime value set via menu; see radar_range.h. */
 constexpr unsigned long kAdsbFetchIntervalMs = 3000;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
 constexpr bool kAdsbShowGroundAircraft = false;

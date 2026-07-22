@@ -142,7 +142,7 @@ void loop() {
     if (!g_radar_visible && !ui::menu::isOpen()) {
       showRadarIfConnected();
     } else if (!ui::menu::isOpen() &&
-               millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
+               millis() - g_last_adsb_fetch_ms >= ui::radar::pollRateMs()) {
       g_last_adsb_fetch_ms = millis();
       fetchAndDrawAircraft();
     }
