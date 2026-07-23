@@ -23,7 +23,7 @@ constexpr char kPrefsTrailsKey[] = "trails";
 constexpr char kPrefsMilKey[] = "mil";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
-constexpr unsigned long kPollRatePresetsMs[] = {1000, 3000, 5000, 10000};
+constexpr unsigned long kPollRatePresetsMs[] = {3000, 5000, 10000};
 constexpr uint8_t kDefaultPollRateIndex = 1;  // 3s
 
 Preferences s_prefs;

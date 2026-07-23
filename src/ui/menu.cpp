@@ -29,7 +29,7 @@ struct MenuItem {
 const char* const kRangeLabels[] = {"5 km", "10 km", "15 km", "25 km"};
 const char* const kLabelModeLabels[] = {"All", "Flight", "None"};
 const char* const kRunwayModeLabels[] = {"Off", "Large", "Medium", "All"};
-const char* const kPollRateLabels[] = {"1s", "3s", "5s", "10s"};
+const char* const kPollRateLabels[] = {"3s", "5s", "10s"};
 const char* const kSweepLabels[] = {"Off", "On"};
 const char* const kMilitaryLabels[] = {"Off", "On"};
 

@@ -69,7 +69,7 @@ uint8_t labelMode();
 void setLabelMode(uint8_t mode);
 
 // --- Poll rate ---
-constexpr uint8_t kPollRatePresetCount = 4;
+constexpr uint8_t kPollRatePresetCount = 3;
 uint8_t pollRateIndex();
 void setPollRateIndex(uint8_t idx);
 unsigned long pollRateMs();
