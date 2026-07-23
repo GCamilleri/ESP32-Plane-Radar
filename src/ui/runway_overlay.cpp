@@ -17,13 +17,24 @@ namespace {
 constexpr size_t kMaxAirportLabels = 64;
 constexpr size_t kMaxCachedSegments = 192;
 
-// Largest airport count across any single tier (medium = 3801).  The per-tier
-// distance/label tracking arrays are sized to this so a single pair of static
-// buffers can be reused for each tier in turn.
-constexpr size_t kMaxTierAirports = 4096;
+// Largest airport count across any single tier (small = 24238).  The per-tier
+// distance/label tracking bitfields are sized to this so a single pair of
+// static buffers can be reused for each tier in turn.  Packed into uint32_t
+// words rather than bool[] to keep RAM at ~6 KB instead of ~50 KB, which
+// matters under TLS memory pressure on the ESP32-C3.
+constexpr size_t kMaxTierAirports = 25000;
+constexpr size_t kTierBitWords = (kMaxTierAirports + 31) / 32;
 
-bool s_in_range[kMaxTierAirports];
-bool s_label_pending[kMaxTierAirports];
+uint32_t s_in_range_bits[kTierBitWords];
+uint32_t s_label_pending_bits[kTierBitWords];
+
+// Named to avoid the Arduino core's bitSet()/bitClear() function macros.
+inline bool tierBitTest(const uint32_t* bits, size_t i) {
+  return (bits[i >> 5] >> (i & 31)) & 1u;
+}
+inline void tierBitSet(uint32_t* bits, size_t i) {
+  bits[i >> 5] |= (1u << (i & 31));
+}
 
 // Cached runway screen coordinates.  Recomputed only when the range preset,
 // heading, or runway mode changes.  Location only changes on reboot so it does
@@ -212,10 +223,9 @@ void cacheRunwaysForTier(float radius_km,
                          size_t runway_count) {
   const size_t tracked =
       (airport_count < kMaxTierAirports) ? airport_count : kMaxTierAirports;
-  for (size_t i = 0; i < tracked; ++i) {
-    s_in_range[i] = false;
-    s_label_pending[i] = false;
-  }
+  const size_t words = (tracked + 31) / 32;
+  memset(s_in_range_bits, 0, words * sizeof(uint32_t));
+  memset(s_label_pending_bits, 0, words * sizeof(uint32_t));
 
   for (size_t i = 0; i < runway_count; ++i) {
     const auto& rw = runways[i];
@@ -223,16 +233,22 @@ void cacheRunwaysForTier(float radius_km,
     if (ap_idx >= tracked) {
       continue;  // Defensive: index outside this tier's airport table.
     }
-    if (!s_in_range[ap_idx]) {
+    // A clear bit means the airport's distance has not yet been confirmed in
+    // range (either not computed, or computed and out of range).  Runways are
+    // grouped by airport, so out-of-range airports recompute at most once per
+    // contiguous run.
+    if (!tierBitTest(s_in_range_bits, ap_idx)) {
       const auto& ap = airports[ap_idx];
       float dx_km = 0.0f;
       float dy_km = 0.0f;
       float dist_km = 0.0f;
       geo::offsetKmFromCenter(e7ToDeg(ap.lat_e7), e7ToDeg(ap.lon_e7), &dx_km,
                               &dy_km, &dist_km);
-      s_in_range[ap_idx] = (dist_km <= radius_km);
+      if (dist_km <= radius_km) {
+        tierBitSet(s_in_range_bits, ap_idx);
+      }
     }
-    if (!s_in_range[ap_idx]) {
+    if (!tierBitTest(s_in_range_bits, ap_idx)) {
       continue;
     }
 
@@ -244,9 +260,9 @@ void cacheRunwaysForTier(float radius_km,
       s_cached_segments[s_cached_segment_count++] = seg;
     }
 
-    if (!s_label_pending[ap_idx] &&
+    if (!tierBitTest(s_label_pending_bits, ap_idx) &&
         s_cached_label_count < kMaxAirportLabels) {
-      s_label_pending[ap_idx] = true;
+      tierBitSet(s_label_pending_bits, ap_idx);
       const auto& ap = airports[ap_idx];
       int ax = 0;
       int ay = 0;
@@ -275,12 +291,20 @@ void rebuildRunwayCache() {
                       data::airports::large::kRunways,
                       data::airports::large::kRunwayCount);
 
-  // Medium airports only in the "All" mode.
+  // Medium airports from the "Large + medium" mode upward.
   if (radar::runwayMode() >= radar::kRunwayModeAll) {
     cacheRunwaysForTier(radius_km, data::airports::medium::kAirports,
                         data::airports::medium::kAirportCount,
                         data::airports::medium::kRunways,
                         data::airports::medium::kRunwayCount);
+  }
+
+  // Small airports only in the "all tiers" mode.
+  if (radar::runwayMode() >= radar::kRunwayModeSmall) {
+    cacheRunwaysForTier(radius_km, data::airports::small::kAirports,
+                        data::airports::small::kAirportCount,
+                        data::airports::small::kRunways,
+                        data::airports::small::kRunwayCount);
   }
 
   s_cached_outer_km = radar::rangeCurrent().outer_km;

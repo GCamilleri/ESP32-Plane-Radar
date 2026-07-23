@@ -23,16 +23,23 @@ struct Runway {
 
 namespace large {
 constexpr size_t kAirportCount = 1160;
-constexpr size_t kRunwayCount = 1705;
+constexpr size_t kRunwayCount = 1776;
 extern const Airport kAirports[];
 extern const Runway kRunways[];
 }  // namespace large
 
 namespace medium {
 constexpr size_t kAirportCount = 3801;
-constexpr size_t kRunwayCount = 4638;
+constexpr size_t kRunwayCount = 5121;
 extern const Airport kAirports[];
 extern const Runway kRunways[];
 }  // namespace medium
+
+namespace small {
+constexpr size_t kAirportCount = 24238;
+constexpr size_t kRunwayCount = 21044;
+extern const Airport kAirports[];
+extern const Runway kRunways[];
+}  // namespace small
 
 }  // namespace data::airports
