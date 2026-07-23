@@ -78,15 +78,21 @@ unsigned long pollRateMs();
 bool sweepEnabled();
 void setSweepEnabled(bool enabled);
 
+// --- Military highlight ---
+bool militaryHighlight();
+void setMilitaryHighlight(bool enabled);
+
 // --- Trails ---
 bool trailsEnabled();
 void setTrailsEnabled(bool enabled);
 
 // --- Runway/airport display mode ---
+// Modes are cumulative: each level adds its tier on top of the lower tiers.
 constexpr uint8_t kRunwayModeOff = 0;
-constexpr uint8_t kRunwayModeLarge = 1;
-constexpr uint8_t kRunwayModeAll = 2;
-constexpr uint8_t kRunwayModeCount = 3;
+constexpr uint8_t kRunwayModeLarge = 1;  // Large only
+constexpr uint8_t kRunwayModeAll = 2;    // Large + medium
+constexpr uint8_t kRunwayModeSmall = 3;  // Large + medium + small
+constexpr uint8_t kRunwayModeCount = 4;
 uint8_t runwayMode();
 void setRunwayMode(uint8_t mode);
 

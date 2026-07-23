@@ -72,6 +72,9 @@ constexpr uint8_t kGridB = 32;
 constexpr uint8_t kAircraftR = 255;
 constexpr uint8_t kAircraftG = 0;
 constexpr uint8_t kAircraftB = 0;
+constexpr uint8_t kMilitaryR = 0;
+constexpr uint8_t kMilitaryG = 230;
+constexpr uint8_t kMilitaryB = 255;
 constexpr uint8_t kTrackR = 255;
 constexpr uint8_t kTrackG = 0;
 constexpr uint8_t kTrackB = 255;
@@ -81,13 +84,12 @@ constexpr uint8_t kTagTypeB = 0;
 constexpr uint8_t kTagAltR = 90;
 constexpr uint8_t kTagAltG = 200;
 constexpr uint8_t kTagAltB = 255;
-constexpr uint8_t kRunwayR = 56;
-constexpr uint8_t kRunwayG = 150;
-constexpr uint8_t kRunwayB = 170;
-/** Lighter teal for ICAO labels (vs runway lines). */
-constexpr uint8_t kRunwayLabelR = 110;
-constexpr uint8_t kRunwayLabelG = 210;
-constexpr uint8_t kRunwayLabelB = 230;
+constexpr uint8_t kRunwayR = 90;
+constexpr uint8_t kRunwayG = 70;
+constexpr uint8_t kRunwayB = 160;
+constexpr uint8_t kRunwayLabelR = 140;
+constexpr uint8_t kRunwayLabelG = 120;
+constexpr uint8_t kRunwayLabelB = 200;
 
 /** Data freshness indicator dot. */
 constexpr uint8_t kFreshR = 0, kFreshG = 200, kFreshB = 0;
@@ -101,6 +103,7 @@ extern uint16_t gColorGrid;
 extern uint16_t gColorLabel;
 extern uint16_t gColorCenter;
 extern uint16_t gColorAircraft;
+extern uint16_t gColorMilitary;
 extern uint16_t gColorTrackVector;
 extern uint16_t gColorTagType;
 extern uint16_t gColorTagAltitude;

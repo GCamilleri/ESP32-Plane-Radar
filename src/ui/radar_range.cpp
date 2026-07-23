@@ -20,6 +20,7 @@ constexpr char kPrefsLabelModeKey[] = "labels";
 constexpr char kPrefsPollRateKey[] = "pollRate";
 constexpr char kPrefsSweepKey[] = "sweep";
 constexpr char kPrefsTrailsKey[] = "trails";
+constexpr char kPrefsMilKey[] = "mil";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
 constexpr unsigned long kPollRatePresetsMs[] = {1000, 3000, 5000, 10000};
@@ -34,6 +35,7 @@ uint8_t s_label_mode = 0;
 uint8_t s_poll_rate_index = kDefaultPollRateIndex;
 bool s_sweep_enabled = true;
 bool s_trails_enabled = true;
+bool s_military_highlight = true;
 
 template <typename T>
 void nvsPut(const char* ns, const char* key, T value);
@@ -100,6 +102,8 @@ void rangeInit() {
   s_sweep_enabled = s_prefs.getBool(kPrefsSweepKey, true);
 
   s_trails_enabled = s_prefs.getBool(kPrefsTrailsKey, true);
+
+  s_military_highlight = s_prefs.getBool(kPrefsMilKey, true);
 
   s_prefs.end();
 }
@@ -229,6 +233,13 @@ bool trailsEnabled() { return s_trails_enabled; }
 void setTrailsEnabled(bool v) {
   s_trails_enabled = v;
   nvsPut<bool>(kPrefsNamespace, kPrefsTrailsKey, v);
+}
+
+bool militaryHighlight() { return s_military_highlight; }
+
+void setMilitaryHighlight(bool enabled) {
+  s_military_highlight = enabled;
+  nvsPut<bool>(kPrefsNamespace, kPrefsMilKey, enabled);
 }
 
 }  // namespace ui::radar

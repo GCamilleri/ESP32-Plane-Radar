@@ -9,9 +9,11 @@
 #include <ArduinoJson.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 
 #include "config.h"
+#include "data/military_ranges.h"
 
 namespace services::adsb {
 
@@ -312,6 +314,12 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     s_aircraft[n].nose_deg = pickNoseHeading(plane);
     s_aircraft[n].track_deg = pickTrackHeading(plane);
     s_aircraft[n].gs_knots = pickGroundSpeed(plane);
+    s_aircraft[n].is_military = false;
+    if (plane["hex"].is<const char*>()) {
+      const uint32_t hex_val =
+          strtoul(plane["hex"].as<const char*>(), nullptr, 16);
+      s_aircraft[n].is_military = data::military::isMilitary(hex_val);
+    }
     fillTagFields(&s_aircraft[n], plane);
     ++n;
   }
