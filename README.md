@@ -16,7 +16,7 @@ Fork of [WatskeBart/ESP32-Plane-Radar](https://github.com/WatskeBart/ESP32-Plane
 - Airport runway overlay with three tiers (~29,000 airports worldwide)
 - Automatic label deconfliction to prevent overlapping text
 - On-device settings menu (range, heading, labels, airports, poll rate, sweep, military)
-- Configurable ADS-B poll rate (1s / 3s / 5s / 10s)
+- Configurable ADS-B poll rate (3s / 5s / 10s)
 - Non-blocking network requests -- display never freezes
 
 ## Hardware
@@ -33,23 +33,26 @@ Fork of [WatskeBart/ESP32-Plane-Radar](https://github.com/WatskeBart/ESP32-Plane
 
 ## Installation
 
-### Option 1: Pre-built binary (easiest)
+### Option 1: One-click web installer (easiest)
 
-Download `plane-radar-v*.bin` from the [Releases](https://github.com/GCamilleri/ESP32-Plane-Radar/releases) page and flash at address `0x0`:
+Open the installer in **Chrome or Edge** on desktop, plug in the board, and click **Install**:
 
-**Web flasher (no install):**
-1. Open [espressif.github.io/esptool-js](https://espressif.github.io/esptool-js/) in Chrome or Edge
-2. Set baud rate to 460800
-3. Click Connect and select your ESP32-C3's serial port
-4. Set address to `0x0`, choose the downloaded `.bin` file, and click Program
+### 👉 [gcamilleri.github.io/ESP32-Plane-Radar](https://gcamilleri.github.io/ESP32-Plane-Radar/)
 
-**Command line:**
+No drivers, no command line, no baud rates or memory addresses to set — the page detects the board and flashes it for you.
+
+### Option 2: Manual flash
+
+Download `plane-radar-v*.bin` from [Releases](https://github.com/GCamilleri/ESP32-Plane-Radar/releases) and flash at address `0x0`:
+
 ```bash
 pip install esptool
 esptool.py --chip esp32c3 --baud 460800 write_flash 0x0 plane-radar-v1.5.0-gc.bin
 ```
 
-### Option 2: Build from source
+Or use the generic [esptool-js web flasher](https://espressif.github.io/esptool-js/): connect, set address `0x0`, select the `.bin`, and program.
+
+### Option 3: Build from source
 
 ```bash
 git clone https://github.com/GCamilleri/ESP32-Plane-Radar.git
@@ -57,6 +60,18 @@ cd ESP32-Plane-Radar
 pio run -t upload        # build + flash
 pio device monitor       # serial monitor (115200 baud)
 ```
+
+## Updating
+
+Use the [web installer](https://gcamilleri.github.io/ESP32-Plane-Radar/) and choose **Keep settings** when prompted — your WiFi and preferences are preserved.
+
+Prefer the command line? Flash the **app-only** image at `0x10000` (leaves your settings, stored below that address, untouched):
+
+```bash
+esptool.py --chip esp32c3 --baud 460800 write_flash 0x10000 plane-radar-app-v1.5.0-gc.bin
+```
+
+> Most releases update this way. If a release note says a full reflash is required (e.g. the partition layout changed), do a fresh install instead -- that resets settings.
 
 ## Setup
 

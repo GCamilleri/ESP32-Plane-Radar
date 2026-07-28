@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Plane Radar — Install</title>
+  <!-- ESP Web Tools: browser-based flasher (Web Serial). Chrome/Edge desktop only.
+       Self-hosted (vendored in CI) — no third-party CDN in the runtime trust path. -->
+  <script
+    type="module"
+    src="./vendor/esp-web-tools/web/install-button.js?module"
+  ></script>
+  <style>
+    :root {
+      --bg: #040a1c;
+      --panel: #0a1430;
+      --grid: #106420;
+      --accent: #17c04a;
+      --text: #e7ecf5;
+      --dim: #8a94a8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1.5rem;
+      padding: 2rem 1.25rem;
+      background: radial-gradient(circle at 50% 30%, #0a1838 0%, var(--bg) 70%);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      text-align: center;
+    }
+    h1 { margin: 0; font-size: 1.9rem; letter-spacing: 0.5px; }
+    p { margin: 0; color: var(--dim); max-width: 34rem; line-height: 1.5; }
+    .card {
+      background: var(--panel);
+      border: 1px solid #16244a;
+      border-radius: 16px;
+      padding: 2rem 1.75rem;
+      max-width: 40rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.25rem;
+    }
+    esp-web-install-button { --esp-tools-button-color: var(--accent); }
+    .steps {
+      text-align: left;
+      color: var(--dim);
+      line-height: 1.6;
+      max-width: 34rem;
+      font-size: 0.95rem;
+    }
+    .steps b { color: var(--text); }
+    .note {
+      font-size: 0.85rem;
+      color: var(--dim);
+      border-top: 1px solid #16244a;
+      padding-top: 1rem;
+      max-width: 34rem;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .browser-warning {
+      display: none;
+      color: #ffcc55;
+      font-size: 0.9rem;
+    }
+    code {
+      background: #16244a;
+      padding: 0.1rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.85em;
+    }
+  </style>
+</head>
+<body>
+  <h1>Plane Radar</h1>
+  <p>Live ADS-B radar for the ESP32-C3 Super Mini. Flash the firmware directly from your browser — no drivers, no command line.</p>
+
+  <div class="card">
+    <esp-web-install-button manifest="firmware/manifest.json">
+      <span slot="unsupported" class="browser-warning" style="display:inline">
+        Web Serial isn't available in this browser. Use <b>Chrome</b> or <b>Edge</b> on desktop.
+      </span>
+      <span slot="not-allowed" class="browser-warning" style="display:inline">
+        This page must be served over HTTPS to flash.
+      </span>
+    </esp-web-install-button>
+
+    <div class="steps">
+      <p style="color:var(--text);margin-bottom:0.5rem"><b>How to install</b></p>
+      1. Plug the board in with a <b>data</b> USB-C cable (not charge-only)<br />
+      2. Click <b>Connect</b> and pick the board's serial port<br />
+      3. Choose:<br />
+      &nbsp;&nbsp;• <b>Install</b> — fresh setup (erases everything)<br />
+      &nbsp;&nbsp;• <b>Keep settings</b> — update and preserve your WiFi &amp; preferences
+    </div>
+
+    <div class="note">
+      Works in <b>Chrome</b> and <b>Edge</b> on desktop only (Web Serial).
+      Not supported on Firefox, Safari, or mobile.
+    </div>
+  </div>
+
+  <p class="note">
+    Prefer the command line? See the
+    <a href="https://github.com/GCamilleri/ESP32-Plane-Radar#updating">README</a>
+    for <code>esptool</code> instructions ·
+    <a href="https://github.com/GCamilleri/ESP32-Plane-Radar/releases">Releases</a> ·
+    <a href="https://github.com/GCamilleri/ESP32-Plane-Radar">Source</a>
+  </p>
+</body>
+</html>

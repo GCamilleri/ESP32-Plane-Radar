@@ -1,4 +1,5 @@
-# Tag a release (v1.0.0) to attach firmware to GitHub Releases.
+# Tag a release (v1.0.0) to attach firmware to GitHub Releases and publish the
+# browser-based one-click installer to GitHub Pages.
 name: Release
 
 on:
@@ -47,10 +48,19 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             VERSION="manual-${GITHUB_SHA::7}"
           fi
-          mkdir -p dist
+          mkdir -p dist installer
+          # Full image for fresh installs (flash at 0x0). Resets all settings.
           cp .pio/build/supermini/firmware-merged.bin "dist/plane-radar-${VERSION}.bin"
           sha256sum "dist/plane-radar-${VERSION}.bin" > "dist/plane-radar-${VERSION}.bin.sha256"
-          echo "version=${VERSION}" >> "$GITHUB_ENV"
+          # App-only image for CLI updates that keep settings (flash at 0x10000).
+          cp .pio/build/supermini/firmware.bin "dist/plane-radar-app-${VERSION}.bin"
+          sha256sum "dist/plane-radar-app-${VERSION}.bin" > "dist/plane-radar-app-${VERSION}.bin.sha256"
+          # Split parts for the web installer (ESP Web Tools).
+          cp .pio/build/supermini/bootloader.bin installer/bootloader.bin
+          cp .pio/build/supermini/partitions.bin installer/partitions.bin
+          cp .pio/build/supermini/firmware.bin installer/firmware.bin
+          BOOT_APP0="$(find ~/.platformio/packages/framework-arduinoespressif32 -name boot_app0.bin | head -1)"
+          cp "$BOOT_APP0" installer/boot_app0.bin
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -59,3 +69,53 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload installer binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: installer/
+
+  pages:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download installer binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: installer
+          path: site/firmware
+
+      - name: Assemble installer site
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="manual-${GITHUB_SHA::7}"
+          fi
+          cp web/index.html site/index.html
+          jq --arg v "$VERSION" '.version = $v' web/manifest.json > site/firmware/manifest.json
+
+      - name: Vendor esp-web-tools (self-hosted; no runtime CDN)
+        run: |
+          npm install --prefix /tmp/ewt esp-web-tools@10.4.0 --no-save
+          mkdir -p site/vendor/esp-web-tools
+          cp -r /tmp/ewt/node_modules/esp-web-tools/dist/* site/vendor/esp-web-tools/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
