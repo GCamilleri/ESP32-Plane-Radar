@@ -48,6 +48,59 @@
       gap: 1.25rem;
     }
     esp-web-install-button { --esp-tools-button-color: var(--accent); }
+    esp-web-install-button button[slot="activate"] {
+      font-family: inherit;
+      cursor: pointer;
+      border-radius: 8px;
+      border: none;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #04210d;
+      font-weight: 600;
+      font-size: 1.05rem;
+      padding: 0.65rem 1.4rem;
+    }
+    .btn-primary:hover { filter: brightness(1.08); }
+    .btn-secondary {
+      background: transparent;
+      color: var(--dim);
+      border: 1px solid #223564 !important;
+      font-size: 0.9rem;
+      padding: 0.5rem 0.9rem;
+    }
+    .btn-secondary:hover { color: var(--text); border-color: #34508f; }
+    .version-row {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .version-row label { color: var(--dim); font-size: 0.95rem; }
+    select {
+      background: #16244a;
+      color: var(--text);
+      border: 1px solid #223564;
+      border-radius: 8px;
+      padding: 0.45rem 0.7rem;
+      font-size: 0.95rem;
+      font-family: inherit;
+    }
+    .buttons {
+      display: flex;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: flex-start;
+    }
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .btn-group .hint { font-size: 0.8rem; color: var(--dim); max-width: 14rem; }
     .steps {
       text-align: left;
       color: var(--dim);
@@ -83,22 +136,40 @@
   <p>Live ADS-B radar for the ESP32-C3 Super Mini. Flash it from your browser over Web Serial.</p>
 
   <div class="card">
-    <esp-web-install-button manifest="firmware/manifest.json">
-      <span slot="unsupported" class="browser-warning" style="display:inline">
-        Web Serial isn't available in this browser. Use <b>Chrome</b> or <b>Edge</b> on desktop.
-      </span>
-      <span slot="not-allowed" class="browser-warning" style="display:inline">
-        This page must be served over HTTPS to flash.
-      </span>
-    </esp-web-install-button>
+    <div class="version-row">
+      <label for="version">Version</label>
+      <select id="version" aria-label="Firmware version">
+        <option value="">Loading&hellip;</option>
+      </select>
+    </div>
+
+    <div class="buttons">
+      <div class="btn-group">
+        <esp-web-install-button id="install-keep">
+          <button slot="activate" class="btn-primary">Update</button>
+          <span slot="unsupported" class="browser-warning" style="display:inline">
+            Web Serial isn't available in this browser. Use <b>Chrome</b> or <b>Edge</b> on desktop.
+          </span>
+          <span slot="not-allowed" class="browser-warning" style="display:inline">
+            This page must be served over HTTPS to flash.
+          </span>
+        </esp-web-install-button>
+        <span class="hint"><b>Recommended.</b> Updates the app and <b>keeps</b> your WiFi &amp; settings. For a board already running Plane Radar.</span>
+      </div>
+
+      <div class="btn-group">
+        <esp-web-install-button id="install-fresh">
+          <button slot="activate" class="btn-secondary">Install (fresh)</button>
+        </esp-web-install-button>
+        <span class="hint">Erases <b>everything</b>, including WiFi &amp; settings. For a new board or a full reset.</span>
+      </div>
+    </div>
 
     <div class="steps">
       <p style="color:var(--text);margin-bottom:0.5rem"><b>How to install</b></p>
       1. Plug the board in with a <b>data</b> USB-C cable (not charge-only)<br />
-      2. Click <b>Connect</b> and pick the board's serial port<br />
-      3. Choose:<br />
-      &nbsp;&nbsp;• <b>Install</b>: fresh setup (erases everything)<br />
-      &nbsp;&nbsp;• <b>Keep settings</b>: update and preserve your WiFi &amp; preferences
+      2. Pick a version above (defaults to the latest)<br />
+      3. Click a button, then <b>Connect</b> and choose the board's serial port
     </div>
 
     <div class="note">
@@ -110,9 +181,47 @@
   <p class="note">
     Prefer the command line? See the
     <a href="https://github.com/GCamilleri/ESP32-Plane-Radar#updating">README</a>
-    for <code>esptool</code> instructions ·
-    <a href="https://github.com/GCamilleri/ESP32-Plane-Radar/releases">Releases</a> ·
+    for <code>esptool</code> instructions &middot;
+    <a href="https://github.com/GCamilleri/ESP32-Plane-Radar/releases">Releases</a> &middot;
     <a href="https://github.com/GCamilleri/ESP32-Plane-Radar">Source</a>
   </p>
+
+  <script>
+    // Version list is generated at deploy time (newest first). Each version dir
+    // holds manifest-full.json (full image) and manifest-keep.json (app-only).
+    const select = document.getElementById("version");
+    const btnFresh = document.getElementById("install-fresh");
+    const btnKeep = document.getElementById("install-keep");
+
+    function applyVersion(v) {
+      if (!v) return;
+      btnFresh.manifest = `firmware/${v}/manifest-full.json`;
+      btnKeep.manifest = `firmware/${v}/manifest-keep.json`;
+    }
+
+    fetch("versions.json", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((versions) => {
+        if (!Array.isArray(versions) || versions.length === 0) {
+          throw new Error("empty versions list");
+        }
+        select.innerHTML = "";
+        versions.forEach((v, i) => {
+          const opt = document.createElement("option");
+          opt.value = v;
+          opt.textContent = i === 0 ? `${v} (latest)` : v;
+          select.appendChild(opt);
+        });
+        select.value = versions[0];
+        applyVersion(versions[0]);
+      })
+      .catch(() => {
+        // Fallback: keep the page usable by pointing at a "latest" alias dir.
+        select.innerHTML = '<option value="latest">latest</option>';
+        applyVersion("latest");
+      });
+
+    select.addEventListener("change", () => applyVersion(select.value));
+  </script>
 </body>
 </html>

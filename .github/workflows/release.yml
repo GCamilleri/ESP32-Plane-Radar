@@ -48,19 +48,14 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             VERSION="manual-${GITHUB_SHA::7}"
           fi
-          mkdir -p dist installer
+          mkdir -p dist
           # Full image for fresh installs (flash at 0x0). Resets all settings.
           cp .pio/build/supermini/firmware-merged.bin "dist/plane-radar-${VERSION}.bin"
           sha256sum "dist/plane-radar-${VERSION}.bin" > "dist/plane-radar-${VERSION}.bin.sha256"
-          # App-only image for CLI updates that keep settings (flash at 0x10000).
+          # App-only image for updates that keep settings (flash at 0x10000). Used
+          # by both the CLI and the web installer's "Update" button.
           cp .pio/build/supermini/firmware.bin "dist/plane-radar-app-${VERSION}.bin"
           sha256sum "dist/plane-radar-app-${VERSION}.bin" > "dist/plane-radar-app-${VERSION}.bin.sha256"
-          # Split parts for the web installer (ESP Web Tools).
-          cp .pio/build/supermini/bootloader.bin installer/bootloader.bin
-          cp .pio/build/supermini/partitions.bin installer/partitions.bin
-          cp .pio/build/supermini/firmware.bin installer/firmware.bin
-          BOOT_APP0="$(find ~/.platformio/packages/framework-arduinoespressif32 -name boot_app0.bin | head -1)"
-          cp "$BOOT_APP0" installer/boot_app0.bin
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -69,12 +64,6 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload installer binaries
-        uses: actions/upload-artifact@v4
-        with:
-          name: installer
-          path: installer/
 
   pages:
     needs: release
@@ -90,20 +79,45 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download installer binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: installer
-          path: site/firmware
-
-      - name: Assemble installer site
+      - name: Build versioned installer site
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${GITHUB_REF_NAME}"
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION="manual-${GITHUB_SHA::7}"
-          fi
+          set -euo pipefail
+          mkdir -p site/firmware
           cp web/index.html site/index.html
-          jq --arg v "$VERSION" '.version = $v' web/manifest.json > site/firmware/manifest.json
+          # Rebuild the whole firmware tree from every release's existing assets
+          # (full merged image + app-only image). Browsers cannot fetch release
+          # assets (no CORS), so we host each version on Pages instead. Doing it
+          # from the release list means old versions accumulate automatically.
+          versions=()
+          for tag in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+                         --json tagName --jq '.[].tagName' | grep '^v' || true); do
+            dir="site/firmware/$tag"
+            mkdir -p "$dir"
+            if gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+                 --pattern "plane-radar-${tag}.bin" --output "$dir/full.bin" --clobber 2>/dev/null; then
+              # Install (fresh): full merged image at 0x0. No new_install_prompt_erase
+              # means ESP Web Tools full-erases first, so this is a clean wipe+install.
+              printf '{"name":"Plane Radar","version":"%s","builds":[{"chipFamily":"ESP32-C3","parts":[{"path":"full.bin","offset":0}]}]}\n' "$tag" > "$dir/manifest-full.json"
+              if gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+                   --pattern "plane-radar-app-${tag}.bin" --output "$dir/app.bin" --clobber 2>/dev/null; then
+                # Update (keep settings): app-only image at 0x10000. new_install_prompt_erase
+                # true makes the erase choice default to OFF, so it flashes only the app and
+                # leaves the NVS settings partition (0x9000) intact. Never auto-erases.
+                printf '{"name":"Plane Radar","version":"%s","new_install_prompt_erase":true,"builds":[{"chipFamily":"ESP32-C3","parts":[{"path":"app.bin","offset":65536}]}]}\n' "$tag" > "$dir/manifest-keep.json"
+              fi
+              versions+=("$tag")
+            else
+              rmdir "$dir" 2>/dev/null || true
+            fi
+          done
+          # "latest" alias so the page has a stable fallback if versions.json fails.
+          if [ ${#versions[@]} -gt 0 ]; then
+            cp -r "site/firmware/${versions[0]}" "site/firmware/latest"
+          fi
+          printf '%s\n' "${versions[@]}" | jq -R . | jq -s . > site/versions.json
+          echo "Published versions:" && cat site/versions.json
 
       - name: Vendor esp-web-tools (self-hosted; no runtime CDN)
         run: |
