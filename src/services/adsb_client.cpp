@@ -253,15 +253,28 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   snprintf(url, sizeof(url), "%s%.6f/lon/%.6f/dist/%.1f",
            kApiBase, center_lat, center_lon, static_cast<double>(dist_nm));
 
-  // Reuse persistent TLS client to keep the session across polls.
+  // Keep-alive: reuse the TLS session across polls so we skip the full
+  // handshake every 3s (fast, smooth). The hazard on this RAM-tight board is a
+  // re-handshake running while the previous session's ~32 KB of mbedTLS buffers
+  // are still held: the fragmented heap starves it (-32512). So if the
+  // connection has dropped, fully release it FIRST, then the fresh handshake
+  // runs from a recovered heap. On any failure we drop it too, so the next poll
+  // reconnects cleanly rather than re-handshaking in place.
   if (!s_http_initialized) {
     s_tls_client.setInsecure();
     s_http.setReuse(true);
     s_http_initialized = true;
   }
 
+  if (!s_tls_client.connected()) {
+    s_http.end();
+    s_tls_client.stop();
+  }
+
   if (!s_http.begin(s_tls_client, url)) {
     Serial.println("adsb: http.begin failed");
+    s_http.end();
+    s_tls_client.stop();
     return false;
   }
 
@@ -270,17 +283,19 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   if (code != HTTP_CODE_OK) {
     Serial.printf("adsb: HTTP %d\n", code);
     s_http.end();
+    s_tls_client.stop();
     return false;
   }
 
   String payload;
-  if (!readResponseBodyWithPoll(s_http, payload)) {
+  const bool got_body = readResponseBodyWithPoll(s_http, payload);
+  if (!got_body) {
     Serial.println("adsb: empty response");
     s_http.end();
+    s_tls_client.stop();
     return false;
   }
-
-  // Do NOT call s_http.end() on success -- let keep-alive hold the connection.
+  // Success: keep the connection open for the next poll (no end()/stop()).
 
   initJsonFilter();
   JsonDocument doc;
