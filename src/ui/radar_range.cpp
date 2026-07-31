@@ -140,15 +140,6 @@ void saveMilesFromPortal(const char* checkbox_value) {
   Serial.printf("Distance units: %s\n", s_use_miles ? "miles" : "km");
 }
 
-void saveRunwaysFromPortal(const char* checkbox_value) {
-  // Portal checkbox is a simple on/off. Map to Large (on) or Off.
-  s_runway_mode = portalCheckboxChecked(checkbox_value)
-                      ? kRunwayModeLarge
-                      : kRunwayModeOff;
-  saveRunwayMode();
-  Serial.printf("Runway overlay mode: %u\n", s_runway_mode);
-}
-
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles) {
   if (use_miles) {
     const int mi = static_cast<int>(lroundf(ring3_km / kKmPerMile));
@@ -161,16 +152,6 @@ void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles) {
 
 void formatCurrentRing3Label(char* buf, size_t len) {
   formatRing3Label(buf, len, rangeCurrent().ring3_km, s_use_miles);
-}
-
-void unitsReset() {
-  s_use_miles = false;
-  s_runway_mode = kRunwayModeLarge;
-  if (s_prefs.begin(kPrefsNamespace, false)) {
-    s_prefs.remove(kPrefsMilesKey);
-    s_prefs.remove(kPrefsRunwaysKey);
-    s_prefs.end();
-  }
 }
 
 uint8_t rangeIndex() { return s_range_index; }

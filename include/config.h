@@ -18,10 +18,28 @@ constexpr unsigned long kWifiConnectAttemptMs = 15000;
 constexpr uint8_t kWifiConnectAttempts = 3;
 constexpr unsigned long kWifiPortalTimeoutSec = 300;  // 5 min then reboot to retry
 constexpr unsigned long kWifiConnectingFrameMs = 50;
+
+/**
+ * 2.4 GHz regulatory region for channel scanning. NZ/EU/AU permit channels
+ * 1-13. The ESP32 default "01" world profile only actively scans 1-11, so a
+ * router that auto-selects channel 12 or 13 is never found (reason 201,
+ * NO_AP_FOUND), which shows up as intermittent connects to hidden SSIDs.
+ * Setting a manual policy forces active scanning across the full range.
+ * US users should set the count to 11.
+ */
+constexpr char kWifiCountryCode[] = "NZ";
+constexpr uint8_t kWifiCountryStartChannel = 1;
+constexpr uint8_t kWifiCountryChannelCount = 13;
 /** Wait after disconnect before reconnecting (avoids portal on brief drops). */
 constexpr unsigned long kWifiDownGraceMs = 4000;
 /** Minimum interval between background reconnect tries. */
 constexpr unsigned long kWifiReconnectIntervalMs = 15000;
+/**
+ * If the link stays down this long, reboot to recover. A cold boot reliably
+ * reconnects, so this is a self-heal backstop for states the in-loop reconnect
+ * cannot clear on its own (e.g. a wedged radio or a stale DHCP lease).
+ */
+constexpr unsigned long kWifiRebootAfterDownMs = 180000;  // 3 min
 
 // --- BOOT button (ESP32-C3 Super Mini, active LOW) ---
 constexpr gpio_num_t kBootPin = GPIO_NUM_9;

@@ -37,4 +37,11 @@ bool fetchAsyncBusy();
 /** If an async fetch completed, sets *success and returns true. */
 bool fetchAsyncConsumeResult(bool* success);
 
+/**
+ * Close the persistent TLS/HTTP connection and force a fresh handshake on the
+ * next fetch. Call after a WiFi drop so a dead keep-alive socket is not reused.
+ * No-op (and safe) while an async fetch is in progress.
+ */
+void resetConnection();
+
 }  // namespace services::adsb

@@ -5,6 +5,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
+#include <esp_system.h>
+
 #ifndef BUILD_GIT_HASH
 #define BUILD_GIT_HASH "dev"
 #endif
@@ -130,9 +132,22 @@ void loop() {
     }
 
     const unsigned long down_ms = millis() - g_wifi_down_since;
+
+    // Self-heal: a cold boot reliably reconnects, so if the link has been down
+    // too long and the in-loop reconnect isn't recovering, reboot.
+    if (down_ms >= config::kWifiRebootAfterDownMs) {
+      Serial.println("WiFi down too long, rebooting to recover");
+      delay(100);
+      esp_restart();
+    }
+
+    // Only touch the radio when no fetch is in flight: the fetch task and a
+    // WiFi teardown must not be inside the network stack at the same time.
     if (down_ms >= config::kWifiDownGraceMs &&
-        millis() - g_last_reconnect_ms >= config::kWifiReconnectIntervalMs) {
+        millis() - g_last_reconnect_ms >= config::kWifiReconnectIntervalMs &&
+        !services::adsb::fetchAsyncBusy()) {
       g_last_reconnect_ms = millis();
+      services::adsb::resetConnection();  // drop the dead keep-alive socket
       if (wifiReconnect()) {
         g_wifi_down_since = 0;
         showRadarIfConnected();

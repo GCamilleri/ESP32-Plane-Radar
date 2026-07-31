@@ -4,6 +4,7 @@
 #include <WiFiManager.h>
 
 #include <cstdio>
+#include <cstring>
 
 #include <Preferences.h>
 #include <esp_system.h>
@@ -82,9 +83,9 @@ char s_miles_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_miles("use_miles", "Display distances in miles", "T", 2,
                                    s_miles_checkbox_attrs, WFM_LABEL_AFTER);
 
-char s_runways_checkbox_attrs[32] = "type=\"checkbox\"";
-WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T", 2,
-                                     s_runways_checkbox_attrs, WFM_LABEL_AFTER);
+// Airport/runway visibility is owned by the on-device menu (4-state), so it is
+// intentionally not a portal parameter. A 2-state portal checkbox would collapse
+// the menu's "Medium"/"All" selection to "Large" on every WiFi/location save.
 
 void refreshPortalParamDefaults() {
   char lat_buf[kCoordParamLen + 1];
@@ -96,9 +97,6 @@ void refreshPortalParamDefaults() {
   snprintf(s_miles_checkbox_attrs, sizeof(s_miles_checkbox_attrs), "type=\"checkbox\"%s",
            ui::radar::useMiles() ? " checked" : "");
   s_param_miles.setValue("T", 2);
-  snprintf(s_runways_checkbox_attrs, sizeof(s_runways_checkbox_attrs),
-           "type=\"checkbox\"%s", ui::radar::showRunways() ? " checked" : "");
-  s_param_runways.setValue("T", 2);
 }
 
 void onPortalParamsSaved() {
@@ -107,7 +105,6 @@ void onPortalParamsSaved() {
     Serial.println("Invalid lat/lon in portal, keeping previous location");
   }
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
-  ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
 }
 
 void attachPortalParams(WiFiManager& wm) {
@@ -115,7 +112,6 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_lat);
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
-  wm.addParameter(&s_param_runways);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
 
@@ -192,12 +188,41 @@ void resetWifiCredentials() {
   markForceConfigPortal();
   eraseWifiCredentials();
   services::location::clear();
-  ui::radar::unitsReset();
-  Serial.println("WiFi credentials, location, and units cleared");
+  // Display preferences (airports, units, range, etc.) live in the on-device
+  // menu and deliberately survive a WiFi reset; only credentials and location
+  // are cleared here.
+  Serial.println("WiFi credentials and location cleared");
+}
+
+// Reliability tuning applied before every STA connect and scan:
+//  - all-channel scan + sort by signal, so we pick the strongest AP that
+//    matches the SSID instead of the first beacon heard. The default
+//    WIFI_FAST_SCAN stops at the first match, which fails in homes with a
+//    mesh/extender or dual-band sharing one SSID even on a strong signal.
+//  - a manual country profile so channels 12-13 are actively scanned. Under
+//    the ESP32 default "01" world profile those channels are skipped (or only
+//    passively scanned), so a hidden AP that auto-selected channel 13 is never
+//    found. This is the main cause of intermittent hidden-SSID reconnects.
+// esp_wifi_set_country() must run after the WiFi driver is started, so call
+// this only after WiFi.mode() has brought the radio up.
+void applyRadioTuning() {
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+
+  wifi_country_t country = {};
+  std::strncpy(country.cc, config::kWifiCountryCode, sizeof(country.cc) - 1);
+  country.schan = config::kWifiCountryStartChannel;
+  country.nchan = config::kWifiCountryChannelCount;
+  country.policy = WIFI_COUNTRY_POLICY_MANUAL;
+  const esp_err_t err = esp_wifi_set_country(&country);
+  if (err != ESP_OK) {
+    Serial.printf("esp_wifi_set_country failed: 0x%x\n", err);
+  }
 }
 
 void onConfigPortalApStarted(WiFiManager*) {
   WiFi.setTxPower(WIFI_POWER_11dBm);
+  applyRadioTuning();  // portal's connect attempt also scans channels 12-13
   statusScreenPortal();
 #ifdef WM_MDNS
   if (MDNS.begin(config::kPortalHostname)) {
@@ -262,6 +287,7 @@ void stopLanWebPortal() {
 void prepareSta() {
   WiFi.setTxPower(WIFI_POWER_11dBm);
   WiFi.mode(WIFI_STA);
+  applyRadioTuning();
   WiFi.setSleep(WIFI_PS_NONE);
   WiFi.setAutoReconnect(true);
 }

@@ -377,4 +377,15 @@ bool fetchAsyncConsumeResult(bool* success) {
   return true;
 }
 
+void resetConnection() {
+  // The fetch task owns s_http/s_tls_client while running; don't touch them
+  // concurrently. The caller is expected to gate on fetchAsyncBusy() too.
+  if (s_async_busy) {
+    return;
+  }
+  s_http.end();
+  s_tls_client.stop();
+  s_http_initialized = false;
+}
+
 }  // namespace services::adsb
