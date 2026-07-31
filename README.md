@@ -17,7 +17,7 @@ Fork of [WatskeBart/ESP32-Plane-Radar](https://github.com/WatskeBart/ESP32-Plane
 - Automatic label deconfliction to prevent overlapping text
 - On-device settings menu (range, heading, labels, airports, poll rate, sweep, military)
 - Configurable ADS-B poll rate (3s / 5s / 10s)
-- Non-blocking network requests -- display never freezes
+- Non-blocking network requests, so the display keeps rendering while data loads
 
 ## Hardware
 
@@ -33,13 +33,9 @@ Fork of [WatskeBart/ESP32-Plane-Radar](https://github.com/WatskeBart/ESP32-Plane
 
 ## Installation
 
-### Option 1: One-click web installer (easiest)
+### Option 1: Web installer
 
-Open the installer in **Chrome or Edge** on desktop, plug in the board, and click **Install**:
-
-### 👉 [gcamilleri.github.io/ESP32-Plane-Radar](https://gcamilleri.github.io/ESP32-Plane-Radar/)
-
-No drivers, no command line, no baud rates or memory addresses to set — the page detects the board and flashes it for you.
+Open [gcamilleri.github.io/ESP32-Plane-Radar](https://gcamilleri.github.io/ESP32-Plane-Radar/) in **Chrome or Edge** on desktop, plug in the board, and click **Install**. The flashing runs in the browser over Web Serial.
 
 ### Option 2: Manual flash
 
@@ -63,7 +59,7 @@ pio device monitor       # serial monitor (115200 baud)
 
 ## Updating
 
-Use the [web installer](https://gcamilleri.github.io/ESP32-Plane-Radar/) and choose **Keep settings** when prompted — your WiFi and preferences are preserved.
+Use the [web installer](https://gcamilleri.github.io/ESP32-Plane-Radar/) and choose **Keep settings** when prompted. Your WiFi and preferences are preserved.
 
 Prefer the command line? Flash the **app-only** image at `0x10000` (leaves your settings, stored below that address, untouched):
 

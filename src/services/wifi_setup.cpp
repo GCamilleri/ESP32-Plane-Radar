@@ -104,7 +104,7 @@ void refreshPortalParamDefaults() {
 void onPortalParamsSaved() {
   if (!services::location::saveFromStrings(s_param_lat.getValue(),
                                            s_param_lon.getValue())) {
-    Serial.println("Invalid lat/lon in portal — keeping previous location");
+    Serial.println("Invalid lat/lon in portal, keeping previous location");
   }
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
@@ -437,7 +437,7 @@ void bootButtonPollLongPress() {
     if (!s_long_press_handled &&
         millis() - down_ms >= config::kBootResetHoldMs) {
       s_long_press_handled = true;
-      Serial.println("BOOT held — resetting WiFi");
+      Serial.println("BOOT held, resetting WiFi");
       wifiResetCredentialsAndReboot();
     }
   } else {
@@ -495,7 +495,7 @@ bool wifiSetupConnect() {
       onStaConnected();
       return true;
     }
-    Serial.println("Portal timed out — rebooting to retry");
+    Serial.println("Portal timed out, rebooting to retry");
     delay(1000);
     esp_restart();
     return false;  // unreachable, satisfies compiler
@@ -514,9 +514,9 @@ bool wifiSetupConnect() {
   }
 
   if (storedWifiCredentials()) {
-    Serial.println("Saved WiFi could not connect — opening setup portal");
+    Serial.println("Saved WiFi could not connect, opening setup portal");
   } else {
-    Serial.println("No saved WiFi — opening setup portal");
+    Serial.println("No saved WiFi, opening setup portal");
   }
 
   if (openConfigPortal() && wifiLinkUp()) {
@@ -524,7 +524,7 @@ bool wifiSetupConnect() {
     return true;
   }
 
-  Serial.println("Portal timed out — rebooting to retry");
+  Serial.println("Portal timed out, rebooting to retry");
   delay(1000);
   esp_restart();
   return false;  // unreachable, satisfies compiler

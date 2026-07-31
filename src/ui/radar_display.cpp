@@ -787,7 +787,7 @@ bool ensureFrameSprite() {
 
 // Double-buffered frame: composite the grid AND aircraft into the off-screen
 // sprite, then blit it to the panel in a single pushSprite. Because the panel
-// is updated in one pass, labels never show an erase/redraw gap — no flicker.
+// is updated in one pass, labels never show an erase/redraw gap, so no flicker.
 void renderFrame() {
   drawStaticGrid(s_frame);  // opens its own DrawScope(s_frame)
   {

@@ -9,10 +9,10 @@ namespace ui::radar {
  * Range presets (label on ring 3 = ¾ of outer radius).
  *
  * Recommended for ADS-B on a 1.28″ display:
- *   5 km  — pattern / very local (airfield vicinity)
- *  10 km  — default; neighborhood spotting
- *  15 km  — wider local area
- *  25 km  — metro / regional picture
+ *   5 km  - pattern / very local (airfield vicinity)
+ *  10 km  - default; neighborhood spotting
+ *  15 km  - wider local area
+ *  25 km  - metro / regional picture
  *
  * Outer radius (for aircraft math) is ring-3 distance ÷ 0.75.
  */
@@ -56,7 +56,7 @@ void unitsReset();
 uint8_t rangeIndex();
 void setRangeIndex(uint8_t idx);
 
-// --- Heading rotation (15° steps, 0–345) ---
+// --- Heading rotation (15° steps, 0-345) ---
 constexpr uint16_t kHeadingStepDeg = 15;
 uint16_t headingDegInt();
 float headingDeg();

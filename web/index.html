@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Plane Radar — Install</title>
+  <title>Install Plane Radar</title>
   <!-- ESP Web Tools: browser-based flasher (Web Serial). Chrome/Edge desktop only.
-       Self-hosted (vendored in CI) — no third-party CDN in the runtime trust path. -->
+       Self-hosted (vendored in CI); no third-party CDN in the runtime trust path. -->
   <script
     type="module"
     src="./vendor/esp-web-tools/web/install-button.js?module"
@@ -80,7 +80,7 @@
 </head>
 <body>
   <h1>Plane Radar</h1>
-  <p>Live ADS-B radar for the ESP32-C3 Super Mini. Flash the firmware directly from your browser — no drivers, no command line.</p>
+  <p>Live ADS-B radar for the ESP32-C3 Super Mini. Flash it from your browser over Web Serial.</p>
 
   <div class="card">
     <esp-web-install-button manifest="firmware/manifest.json">
@@ -97,8 +97,8 @@
       1. Plug the board in with a <b>data</b> USB-C cable (not charge-only)<br />
       2. Click <b>Connect</b> and pick the board's serial port<br />
       3. Choose:<br />
-      &nbsp;&nbsp;• <b>Install</b> — fresh setup (erases everything)<br />
-      &nbsp;&nbsp;• <b>Keep settings</b> — update and preserve your WiFi &amp; preferences
+      &nbsp;&nbsp;• <b>Install</b>: fresh setup (erases everything)<br />
+      &nbsp;&nbsp;• <b>Keep settings</b>: update and preserve your WiFi &amp; preferences
     </div>
 
     <div class="note">

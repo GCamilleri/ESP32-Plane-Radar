@@ -1,5 +1,5 @@
 /**
- * Plane Radar — WiFi setup, then radar UI on the round GC9A01 display.
+ * Plane Radar: WiFi setup, then radar UI on the round GC9A01 display.
  */
 
 #include <Arduino.h>
@@ -121,7 +121,7 @@ void loop() {
 
   if (WiFi.status() != WL_CONNECTED) {
     if (g_radar_visible) {
-      Serial.println("WiFi lost — will reconnect");
+      Serial.println("WiFi lost, will reconnect");
       g_radar_visible = false;
     }
 
