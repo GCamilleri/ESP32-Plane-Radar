@@ -79,10 +79,6 @@ void setSweepEnabled(bool enabled);
 bool militaryHighlight();
 void setMilitaryHighlight(bool enabled);
 
-// --- Trails ---
-bool trailsEnabled();
-void setTrailsEnabled(bool enabled);
-
 // --- Runway/airport display mode ---
 // Modes are cumulative: each level adds its tier on top of the lower tiers.
 constexpr uint8_t kRunwayModeOff = 0;
