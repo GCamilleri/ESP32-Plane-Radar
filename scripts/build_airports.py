@@ -183,8 +183,11 @@ def render_header(tier_counts: list[tuple[str, int, int]]) -> str:
         "",
         "namespace data::airports {",
         "",
+        "// ident is a fixed 4-char ICAO code and is NOT null-terminated (every",
+        "// ident is exactly 4 chars, so a terminator would be pure padding).",
+        "// Copy into a null-terminated buffer before using it as a C string.",
         "struct Airport {",
-        "  char ident[5];",
+        "  char ident[4];",
         "  int32_t lat_e7;",
         "  int32_t lon_e7;",
         "};",
@@ -195,7 +198,6 @@ def render_header(tier_counts: list[tuple[str, int, int]]) -> str:
         "  int32_t le_lon_e7;",
         "  int32_t he_lat_e7;",
         "  int32_t he_lon_e7;",
-        "  uint16_t length_m;",
         "};",
         "",
     ]
@@ -219,15 +221,20 @@ def render_tier_cpp(
         "const Airport kAirports[] = {",
     ]
     for ident, lat, lon in airport_rows:
-        lines.append(f'  {{"{ident}", {lat}, {lon}}},')
+        # char[4], not null-terminated -> emit a char-array initializer, since a
+        # C++ string literal "ABCD" needs 5 bytes and won't fit char[4].
+        chars = ", ".join(f"'{c}'" for c in ident)
+        lines.append("  {{" + chars + "}, " + f"{lat}, {lon}}},")
     lines += [
         "};",
         "",
         "const Runway kRunways[] = {",
     ]
-    for airport_idx, le_lat, le_lon, he_lat, he_lon, length_m in segments:
+    for row in segments:
+        # length_m (row[5], if present) is intentionally dropped: unused on-device.
+        airport_idx, le_lat, le_lon, he_lat, he_lon = row[0], row[1], row[2], row[3], row[4]
         lines.append(
-            f"  {{{airport_idx}, {le_lat}, {le_lon}, {he_lat}, {he_lon}, {length_m}}},"
+            f"  {{{airport_idx}, {le_lat}, {le_lon}, {he_lat}, {he_lon}}},"
         )
     lines += [
         "};",

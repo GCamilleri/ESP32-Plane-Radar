@@ -6,8 +6,11 @@
 
 namespace data::airports {
 
+// ident is a fixed 4-char ICAO code and is NOT null-terminated (every
+// ident is exactly 4 chars, so a terminator would be pure padding).
+// Copy into a null-terminated buffer before using it as a C string.
 struct Airport {
-  char ident[5];
+  char ident[4];
   int32_t lat_e7;
   int32_t lon_e7;
 };
@@ -18,7 +21,6 @@ struct Runway {
   int32_t le_lon_e7;
   int32_t he_lat_e7;
   int32_t he_lon_e7;
-  uint16_t length_m;
 };
 
 namespace large {
