@@ -87,6 +87,14 @@ void applyRunwayLabelStyle(lgfx::LGFXBase& gfx) {
 
 float e7ToDeg(int32_t e7) { return static_cast<float>(e7) * 1e-7f; }
 
+// data::airports::Airport::ident is char[4] and NOT null-terminated (the null
+// would be pure padding as every ident is exactly 4 chars). Copy it into a
+// 5-byte buffer before using it as a C string with textWidth()/drawString().
+inline void identToCStr(const char (&ident)[4], char out[5]) {
+  memcpy(out, ident, 4);
+  out[4] = '\0';
+}
+
 bool segmentIntersectsDisc(int x0, int y0, int x1, int y1) {
   const int cx = radar::kCenterX;
   const int cy = radar::kCenterY;
@@ -210,7 +218,9 @@ void drawAirportLabel(lgfx::LGFXBase& gfx,
   int lx = 0;
   int ly = 0;
   offsetLabelFromCenter(ax, ay, &lx, &ly);
-  drawBoldRunwayLabel(gfx, ap.ident, lx, ly);
+  char ident[5];
+  identToCStr(ap.ident, ident);
+  drawBoldRunwayLabel(gfx, ident, lx, ly);
 }
 
 /** Cache runway segments and airport labels for a single tier.  Appends to the
@@ -271,8 +281,7 @@ void cacheRunwaysForTier(float radius_km,
       int lx = 0;
       int ly = 0;
       offsetLabelFromCenter(ax, ay, &lx, &ly);
-      memcpy(s_cached_labels[s_cached_label_count].ident, ap.ident,
-             sizeof(ap.ident));
+      identToCStr(ap.ident, s_cached_labels[s_cached_label_count].ident);
       s_cached_labels[s_cached_label_count].x = static_cast<int16_t>(lx);
       s_cached_labels[s_cached_label_count].y = static_cast<int16_t>(ly);
       ++s_cached_label_count;
