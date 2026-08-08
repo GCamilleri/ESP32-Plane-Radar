@@ -84,45 +84,118 @@ int performGetWithPoll(HTTPClient& http) {
   return HTTPC_ERROR_READ_TIMEOUT;
 }
 
-bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
-  WiFiClient* stream = http.getStreamPtr();
-  if (stream == nullptr) {
-    return false;
+// Buffered, poll-interleaved, deadline-bounded reader that feeds ArduinoJson
+// directly from the TLS socket. Avoids allocating a full-payload String: the
+// parser pulls bytes through a small 512-byte staging buffer while we keep the
+// portal/mDNS/watchdog fed and enforce a wall-clock deadline. This removes the
+// transient heap spike (up to ~100 KB in busy airspace) during the exact window
+// when mbedTLS buffers make the heap tightest.
+class StreamJsonReader {
+ public:
+  StreamJsonReader(WiFiClient* stream, int content_length,
+                   unsigned long deadline_ms)
+      : stream_(stream),
+        remaining_(content_length),
+        have_len_(content_length > 0),
+        deadline_(deadline_ms) {}
+
+  // ArduinoJson custom-reader interface: one byte or -1 at EOF. The JSON parser
+  // only ever calls read(); readBytes() below is provided for completeness.
+  int read() {
+    if (pos_ >= len_ && !refill()) {
+      return -1;
+    }
+    return static_cast<unsigned char>(buf_[pos_++]);
   }
 
-  const int content_length = http.getSize();
-  if (content_length > 0) {
-    payload.reserve(static_cast<unsigned>(content_length + 1));
-  } else {
-    payload.reserve(8192);
+  size_t readBytes(char* dst, size_t length) {
+    size_t got = 0;
+    while (got < length) {
+      if (pos_ >= len_ && !refill()) {
+        break;
+      }
+      dst[got++] = buf_[pos_++];
+    }
+    return got;
   }
 
-  uint8_t buffer[512];
-  const unsigned long start = millis();
-  while (millis() - start < kRequestTimeoutMs) {
+  size_t bytesConsumed() const { return consumed_; }
+
+ private:
+  bool refill() {
+    pos_ = 0;
+    len_ = 0;
+    for (;;) {
+      if (have_len_ && remaining_ <= 0) {
+        return false;  // whole body consumed; clean EOF for keep-alive
+      }
+      pollNetwork();  // no-op in the async task; keeps portal alive if inline
+      int available = stream_->available();
+      if (available > 0) {
+        int to_read = available > static_cast<int>(sizeof(buf_))
+                          ? static_cast<int>(sizeof(buf_))
+                          : available;
+        if (have_len_ && to_read > remaining_) {
+          to_read = remaining_;
+        }
+        int n = stream_->read(reinterpret_cast<uint8_t*>(buf_), to_read);
+        if (n > 0) {
+          len_ = n;
+          consumed_ += static_cast<size_t>(n);
+          if (have_len_) {
+            remaining_ -= n;
+          }
+          return true;
+        }
+      }
+      if (!stream_->connected() && stream_->available() <= 0) {
+        return false;  // socket closed with no more data
+      }
+      if (static_cast<long>(millis() - deadline_) >= 0) {
+        return false;  // deadline hit: parser sees truncated input, errors out
+      }
+      delay(1);  // yield: feed the idle task, let the render loop run
+    }
+  }
+
+  WiFiClient* stream_;
+  int remaining_;
+  bool have_len_;
+  unsigned long deadline_;
+  char buf_[512];
+  int pos_ = 0;
+  int len_ = 0;
+  size_t consumed_ = 0;
+};
+
+// Drain any bytes the parser left unread (the adsb.fi body ends with a trailing
+// '\n' after the final '}') so the reused keep-alive socket starts the next
+// response cleanly rather than desyncing the following status line.
+void drainRemainder(WiFiClient* stream, int content_length, size_t consumed,
+                    unsigned long deadline_ms) {
+  if (content_length <= 0) {
+    return;
+  }
+  uint8_t sink[128];
+  while (static_cast<int>(consumed) < content_length &&
+         static_cast<long>(millis() - deadline_ms) < 0) {
     pollNetwork();
-    const int available = stream->available();
+    int available = stream->available();
     if (available > 0) {
-      const int to_read =
-          available > static_cast<int>(sizeof(buffer)) ? static_cast<int>(sizeof(buffer))
-                                                       : available;
-      const int read_bytes = stream->readBytes(buffer, to_read);
-      if (read_bytes > 0) {
-        payload.concat(reinterpret_cast<const char*>(buffer),
-                       static_cast<unsigned>(read_bytes));
+      int to_read = available > static_cast<int>(sizeof(sink))
+                        ? static_cast<int>(sizeof(sink))
+                        : available;
+      int n = stream->read(sink, to_read);
+      if (n > 0) {
+        consumed += static_cast<size_t>(n);
+        continue;
       }
     }
-    if (content_length > 0 &&
-        static_cast<int>(payload.length()) >= content_length) {
-      break;
-    }
-    if (!http.connected() && stream->available() <= 0) {
+    if (!stream->connected() && stream->available() <= 0) {
       break;
     }
     delay(1);
   }
-
-  return payload.length() > 0;
 }
 
 float kmToNauticalMiles(float km) { return km / kKmPerNm; }
@@ -287,24 +360,32 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return false;
   }
 
-  String payload;
-  const bool got_body = readResponseBodyWithPoll(s_http, payload);
-  if (!got_body) {
-    Serial.println("adsb: empty response");
+  WiFiClient* stream = s_http.getStreamPtr();
+  if (stream == nullptr) {
+    Serial.println("adsb: no stream");
     s_http.end();
     s_tls_client.stop();
     return false;
   }
-  // Success: keep the connection open for the next poll (no end()/stop()).
+  const int content_length = s_http.getSize();
+  const unsigned long deadline = millis() + kRequestTimeoutMs;
 
+  // Parse straight from the TLS stream: no intermediate String payload buffer.
   initJsonFilter();
   JsonDocument doc;
+  StreamJsonReader reader(stream, content_length, deadline);
   const DeserializationError err =
-      deserializeJson(doc, payload, DeserializationOption::Filter(s_json_filter));
+      deserializeJson(doc, reader, DeserializationOption::Filter(s_json_filter));
   if (err) {
     Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
+    // Socket position is now uncertain; force a fresh connection next poll.
+    s_http.end();
+    s_tls_client.stop();
     return false;
   }
+  // Drain trailing bytes so the reused keep-alive socket stays in sync.
+  drainRemainder(stream, content_length, reader.bytesConsumed(), deadline);
+  // Success: keep the connection open for the next poll (no end()/stop()).
 
   JsonArray ac = doc["ac"].as<JsonArray>();
   if (ac.isNull()) {
