@@ -79,6 +79,10 @@ void setSweepEnabled(bool enabled);
 bool militaryHighlight();
 void setMilitaryHighlight(bool enabled);
 
+// --- LAN WiFi config web portal (off by default after setup) ---
+bool webPortalEnabled();
+void setWebPortalEnabled(bool enabled);
+
 // --- Runway/airport display mode ---
 // Modes are cumulative: each level adds its tier on top of the lower tiers.
 constexpr uint8_t kRunwayModeOff = 0;
