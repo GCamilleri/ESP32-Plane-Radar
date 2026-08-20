@@ -19,6 +19,11 @@ namespace {
 constexpr char kPrefsNamespace[] = "social";
 constexpr char kPrefsSecretKey[] = "secret";
 constexpr char kPrefsHandleKey[] = "handle";
+/**
+ * The handle the server granted, as opposed to the one the user asked for.
+ * Persisting it is what lets a reboot skip registration entirely.
+ */
+constexpr char kPrefsGrantedKey[] = "granted";
 
 constexpr char kPathRegister[] = "/v1/register";
 constexpr char kPathTag[] = "/v1/tag";
@@ -132,6 +137,19 @@ void loadOrCreateSecret() {
     if (!normaliseHandle(stored, s_wanted_handle, sizeof(s_wanted_handle))) {
       s_wanted_handle[0] = '\0';
     }
+
+    // A handle we were previously granted means the server already knows this
+    // device, so there is nothing to register and the handle is available
+    // immediately, which is what decides whether an incoming tag is our own.
+    // If the server has since forgotten us, the first claim returns 401 and the
+    // re-registration path below picks it up.
+    char granted[adsb::kTagHandleLen] = {0};
+    prefs.getString(kPrefsGrantedKey, granted, sizeof(granted));
+    if (normaliseHandle(granted, s_handle, sizeof(s_handle))) {
+      s_registered = true;
+    } else {
+      s_handle[0] = '\0';
+    }
     prefs.end();
   } else {
     // No NVS: still usable this session, just not across reboots.
@@ -151,6 +169,15 @@ void deriveDeviceId() {
     return;
   }
   toHex(digest, 6, s_device_id);  // 12 hex chars, matches the Worker's regex
+}
+
+/** Remember the granted handle so the next boot need not register again. */
+void persistGrantedHandle() {
+  Preferences prefs;
+  if (prefs.begin(kPrefsNamespace, false)) {
+    prefs.putString(kPrefsGrantedKey, s_handle);
+    prefs.end();
+  }
 }
 
 void setState(PendingState state, uint32_t icao, const char* owner) {
@@ -228,6 +255,20 @@ void init() {
   if (s_device_id[0] != '\0') {
     Serial.printf("social: device %s\n", s_device_id);
   }
+  // enabled() silently returns false for three unrelated reasons (no feed URL
+  // in this build, SHA-256 unavailable, or the user switched tags off), and a
+  // radar that never registers looks identical from the serial log in all of
+  // them. Say which one it is once, at boot, instead of leaving that to be
+  // reverse-engineered from what did not happen.
+  if (!enabled()) {
+    if (config::kFeedProxyBaseUrl[0] == '\0') {
+      Serial.println("social: tags disabled (no feed proxy configured in this build)");
+    } else if (s_device_id[0] == '\0') {
+      Serial.println("social: tags disabled (no device id)");
+    } else if (!ui::radar::socialEnabled()) {
+      Serial.println("social: tags disabled (Tags menu is off)");
+    }
+  }
 }
 
 bool enabled() {
@@ -254,12 +295,16 @@ void saveHandleFromPortal(const char* value) {
   std::strncpy(s_wanted_handle, normalised, sizeof(s_wanted_handle) - 1);
   s_wanted_handle[sizeof(s_wanted_handle) - 1] = '\0';
 
+  // Store the new request and drop the old grant together. Clearing the grant is
+  // what forces re-registration; without it a reboot before the new handle lands
+  // would read the old one back, believe itself registered, and silently drop the
+  // change.
   Preferences prefs;
   if (prefs.begin(kPrefsNamespace, false)) {
     prefs.putString(kPrefsHandleKey, s_wanted_handle);
+    prefs.remove(kPrefsGrantedKey);
     prefs.end();
   }
-  // Re-register so the new handle takes effect without a reboot.
   s_registered = false;
   s_register_attempted = false;
   s_last_register_attempt_ms = 0;
@@ -429,6 +474,7 @@ void completeRequest(int http_code, const char* body) {
       std::strncpy(s_handle, assigned, sizeof(s_handle) - 1);
       s_handle[sizeof(s_handle) - 1] = '\0';
       s_registered = true;
+      persistGrantedHandle();
       Serial.printf("social: registered as %s\n", s_handle);
     } else {
       Serial.printf("social: registration failed (HTTP %d)\n", http_code);
@@ -458,11 +504,21 @@ void completeRequest(int http_code, const char* body) {
       break;
     }
     case 401:
-      // Our identity is not what the Worker thinks it is; re-register at once.
+      // The server does not know this device, most likely because its database
+      // was replaced. Re-register at once and put the request back on the queue
+      // rather than making the user press again: nextRequest() sends the
+      // registration first, then this on the following poll. The pending timeout
+      // still bounds it if registration keeps failing.
       s_registered = false;
       s_register_attempted = false;
       s_last_register_attempt_ms = 0;
-      setState(PendingState::kError, icao, nullptr);
+      portENTER_CRITICAL(&s_mux);
+      s_queued_action = action;
+      s_queued_icao = icao;
+      s_state = PendingState::kQueued;
+      s_pending_since_ms = millis();
+      portEXIT_CRITICAL(&s_mux);
+      Serial.println("social: server does not know us, re-registering");
       break;
     default:
       Serial.printf("social: tag request failed (HTTP %d)\n", http_code);
