@@ -1,5 +1,5 @@
 import { config } from './config.ts';
-import { TtlCache } from './cache.ts';
+import { MinIntervalLimiter, TtlCache } from './cache.ts';
 import { aircraftLine, type FeedAircraft } from './protocol.ts';
 
 // Self-hosting removes the request cap that shaped the Cloudflare version, but it
@@ -7,10 +7,13 @@ import { aircraftLine, type FeedAircraft } from './protocol.ts';
 // limit yours rather than a shared pool's, which is an improvement and still a
 // limit.
 //
-// So the aircraft block is still keyed on a quantised centre: every radar in the
-// same neighbourhood shares one cache entry and therefore one upstream fetch, and
-// the upstream rate stays bounded by (populated cells / FEED_CACHE_SECONDS) rather
-// than by how many radars you own.
+// Two mechanisms keep us inside it. The aircraft block is keyed on a quantised
+// centre, so every radar in the same neighbourhood shares one cache entry and one
+// upstream fetch. And a shared minimum-interval limiter caps the fetch rate outright,
+// because cell sharing alone does not: one client asking about many different cells
+// multiplies fetches without making many requests. When the limiter refuses, a
+// slightly stale cell is served instead, which beats failing the poll and beats
+// getting the address restricted.
 
 /** ~5.5 km cells: coarse enough to pool neighbours, fine enough for the 64 slots. */
 const CELL_DEGREES = 0.05;
@@ -19,6 +22,7 @@ const CELL_DEGREES = 0.05;
 export const MAX_AIRCRAFT = 64;
 
 const cellCache = new TtlCache<string[]>();
+const upstreamLimiter = new MinIntervalLimiter(config.upstreamMinIntervalMs);
 
 export interface FeedRequest {
   lat: number;
@@ -29,8 +33,13 @@ export interface FeedRequest {
 
 export interface AircraftBlock {
   lines: string[];
-  /** 'hit' means this request cost no adsb.fi fetch. */
-  cache: 'hit' | 'miss';
+  /**
+   * How this was served. 'hit' cost no adsb.fi fetch; 'stale' means the upstream
+   * limiter refused and a slightly old cell was used instead.
+   */
+  cache: 'hit' | 'miss' | 'stale';
+  /** Seconds out of date, when `cache` is 'stale'. */
+  ageSeconds?: number;
 }
 
 export class FeedUpstreamError extends Error {
@@ -140,6 +149,16 @@ export async function aircraftBlock(req: FeedRequest): Promise<AircraftBlock> {
   const cached = cellCache.get(key);
   if (cached !== undefined) return { lines: cached, cache: 'hit' };
 
+  // Cache miss, so this would cost an upstream fetch. If that would breach the
+  // interval, fall back to whatever we last had for this cell.
+  if (!upstreamLimiter.tryAcquire()) {
+    const stale = cellCache.getStale(key, config.maxStaleSeconds);
+    if (stale !== undefined) {
+      return { lines: stale.value, cache: 'stale', ageSeconds: stale.ageSeconds };
+    }
+    throw new FeedUpstreamError('upstream rate limited and no cached cell', 0);
+  }
+
   const lat = quantise(req.lat).toFixed(4);
   const lon = quantise(req.lon).toFixed(4);
   const dist = Math.ceil(req.distNm);
@@ -177,5 +196,5 @@ export async function aircraftBlock(req: FeedRequest): Promise<AircraftBlock> {
 }
 
 export function sweepFeedCache(): void {
-  cellCache.sweep();
+  cellCache.sweep(config.maxStaleSeconds);
 }

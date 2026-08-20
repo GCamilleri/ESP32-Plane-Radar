@@ -41,18 +41,46 @@ export const config = {
   // Cloudflare version needed a TTL there and it cost two or three poll cycles
   // before your own tag showed up on your own radar.
 
-  claimsPerHour: num('CLAIMS_PER_HOUR', 10),
-  maxActiveTags: num('MAX_ACTIVE_TAGS', 64),
+  /**
+   * How many aircraft one device may hold tags on at once.
+   *
+   * A concurrency cap, not a rate limit: an expired or released tag frees its slot
+   * immediately, and refreshing a tag you already hold does not consume another.
+   * That makes it behave the way a user expects, where the earlier hourly counter
+   * both counted refreshes and never gave slots back.
+   */
+  maxTagsPerDevice: num('MAX_TAGS_PER_DEVICE', 10),
 
   /**
-   * When set, every request must carry `X-Radar-Key` with this value or it is
-   * refused. Empty disables the check.
+   * Hard bound on how many tags a feed response carries, purely to bound its size.
+   * Not a claim limit: a claim is never refused because other people hold tags.
    *
-   * Belt to the proxy's braces. Checking it here as well means the gate still holds
-   * if the reverse proxy is reconfigured or bypassed, which is the failure mode that
-   * matters: the proxy is the thing most likely to be edited by hand later.
+   * Must not exceed the firmware's services::adsb::kMaxFeedTags, or the device
+   * silently drops the excess. Beyond this many active tags the response carries the
+   * most recently claimed ones.
    */
-  feedKey: str('FEED_KEY', ''),
+  maxFeedTags: num('MAX_FEED_TAGS', 64),
+
+  /** Registrations allowed per client address per hour. */
+  registrationsPerHourPerIp: num('REGISTRATIONS_PER_HOUR_PER_IP', 5),
+
+  /**
+   * Minimum gap between requests to adsb.fi, across all clients.
+   *
+   * This is the one limit that protects something we do not control: adsb.fi allows
+   * 1 request/second per IP, and every fetch here comes from a single address. Per
+   * client rate limiting cannot enforce it, because one client asking about many
+   * different map cells multiplies upstream fetches without making many requests.
+   * So the ceiling is enforced where the fetches actually happen.
+   */
+  upstreamMinIntervalMs: num('UPSTREAM_MIN_INTERVAL_MS', 1000),
+
+  /**
+   * How stale a cached cell may be when the upstream limiter refuses a fetch.
+   * Slightly old aircraft beat both a failed poll and getting the address
+   * restricted.
+   */
+  maxStaleSeconds: num('MAX_STALE_SECONDS', 60),
 
   /** Rejects replayed signatures. Generous: the ESP32 has no RTC and drifts. */
   maxClockSkewSeconds: num('MAX_CLOCK_SKEW_SECONDS', 600),

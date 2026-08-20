@@ -20,16 +20,17 @@ services:
       # Unraid's nobody:users; on other hosts use the owner of ./data.
       PUID: "99"
       PGID: "100"
-      # Shared key every radar must send as X-Radar-Key. Leave empty for an open
-      # server; set it to the same value the firmware was built with and check it at
-      # the reverse proxy too.
-      FEED_KEY: "${FEED_KEY:-}"
       LOCK_SECONDS: "1800"
-      CLAIMS_PER_HOUR: "10"
-      MAX_ACTIVE_TAGS: "64"
-      # Floor on how often one map cell can hit adsb.fi, whose public limit is
-      # 1 request/second per IP. Raise it if you add radars in scattered places.
+      # Aircraft one device may hold tags on at once. An expired or released tag
+      # frees its slot immediately.
+      MAX_TAGS_PER_DEVICE: "10"
+      # Floor on how often one map cell can hit adsb.fi. The hard ceiling is
+      # UPSTREAM_MIN_INTERVAL_MS below; this just keeps popular cells cheap.
       FEED_CACHE_SECONDS: "4"
+      # adsb.fi allows 1 request/second per IP and every fetch here comes from one
+      # address, so this is the limit that protects something we do not control.
+      UPSTREAM_MIN_INTERVAL_MS: "1000"
+      REGISTRATIONS_PER_HOUR_PER_IP: "5"
     logging:
       driver: json-file
       options:

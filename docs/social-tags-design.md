@@ -109,14 +109,41 @@ the PR1 header. Until the first feed response arrives, signed requests are held
 rather than sent with a timestamp that would be rejected for skew.
 
 Server-side policy, all of it off the device: lock duration, tag TTL,
-`CLAIMS_PER_HOUR`, `MAX_ACTIVE_TAGS`, handle charset and length, first-come handle
-uniqueness, and a blocklist to blunt impersonation and slurs.
+`MAX_TAGS_PER_DEVICE`, handle charset and length, first-come handle uniqueness, and a
+blocklist to blunt impersonation and slurs.
 
-`/v1/feed` is unsigned so the firmware's hot path stays simple. On Cloudflare that
-left the daily request budget open to anyone who found the URL; self-hosted there is
-no such budget to burn, so the exposure is bandwidth and adsb.fi calls. If the server
-is put behind a Cloudflare Tunnel, a rate limiting rule on the zone is the place to
-bound it.
+## Open on purpose, bounded instead
+
+Anyone can build a radar and point it at the server. There is no shared key and
+nothing to onboard, which is a deliberate choice about what is worth defending.
+
+A shared secret was built and then removed. It was a barrier to the thing the project
+wants to encourage, and it did not work anyway: the key had to be compiled into the
+firmware, so anyone holding a binary had it, and one shared key cannot be revoked for
+one person. It protected an endpoint that nobody minds being used.
+
+What is left to protect is availability, not secrecy, so the controls are limits:
+
+- **`UPSTREAM_MIN_INTERVAL_MS`** caps adsb.fi fetches across all clients. This is the
+  only limit guarding something outside our control. Per-client rate limiting cannot
+  do it, because one client asking about many scattered cells multiplies upstream
+  fetches without making many requests. When the limiter refuses, a cell up to
+  `MAX_STALE_SECONDS` old is served instead: slightly stale aircraft beat both a
+  failed poll and a restricted address.
+- **`MAX_TAGS_PER_DEVICE`** caps concurrent tags per device. Counted from unexpired
+  rows rather than a stored tally, so an expired or released tag frees its slot at
+  once and refreshing a tag you hold costs nothing. The earlier design was an hourly
+  counter, which both counted refreshes and never gave slots back: it measured the
+  wrong thing.
+- **`REGISTRATIONS_PER_HOUR_PER_IP`** stops identities being minted in bulk to get
+  around the per-device cap.
+
+There is deliberately no global tag cap. A claim is never refused because other
+people hold tags. `MAX_FEED_TAGS` only bounds response size, and must not exceed the
+firmware's `kMaxFeedTags` or the device silently drops the excess.
+
+If someone abuses it regardless, the escalation is deleting their rows from
+`devices`. Reactive, and proportionate at this scale.
 
 ## Interaction
 

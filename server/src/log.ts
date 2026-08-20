@@ -26,7 +26,8 @@ export function logFeed(opts: {
   lon: number;
   distNm: number;
   cell: string;
-  cache: 'hit' | 'miss';
+  cache: 'hit' | 'miss' | 'stale';
+  ageSeconds?: number;
   aircraft: number;
   tags: number;
   ms: number;
@@ -36,7 +37,11 @@ export function logFeed(opts: {
     lat: opts.lat.toFixed(4),
     lon: opts.lon.toFixed(4),
     dist: opts.distNm,
-    upstream: opts.cache === 'miss' ? 'fetch' : 'cached',
+    // 'stale' means the upstream limiter refused a fetch and an older cell was
+    // served: worth seeing in the log, since a steady stream of it says the limit
+    // is being hit rather than that everything is fine.
+    upstream: opts.cache === 'miss' ? 'fetch' : opts.cache === 'stale' ? 'stale' : 'cached',
+    age: opts.ageSeconds,
     ac: opts.aircraft,
     tags: opts.tags,
     ms: opts.ms,

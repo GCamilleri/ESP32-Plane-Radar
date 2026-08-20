@@ -9,11 +9,22 @@ import {
   parseFeedRequest,
   sweepFeedCache,
 } from './feed.ts';
+import { FixedWindowCounter } from './cache.ts';
 import { logFeed, logInfo, logRegister, logRejected, logTag } from './log.ts';
 import { headerLine, normaliseIcao } from './protocol.ts';
 import { TagStore, type Reply } from './store.ts';
 
 const store = new TagStore();
+
+/**
+ * Registration is open by design: anyone should be able to build a radar and use
+ * this. Open does not have to mean unbounded, though, and minting identities in
+ * bulk is the one thing that would let someone crowd out everyone else's tags.
+ */
+const registrationLimiter = new FixedWindowCounter(
+  3_600_000,
+  config.registrationsPerHourPerIp,
+);
 
 /** Cap on request bodies. Every legitimate one is well under 200 bytes. */
 const MAX_BODY_BYTES = 4096;
@@ -64,6 +75,7 @@ async function handleFeed(params: URLSearchParams, res: ServerResponse): Promise
     distNm: req.distNm,
     cell: cellLabel(req),
     cache: aircraft.cache,
+    ageSeconds: aircraft.ageSeconds,
     aircraft: aircraft.lines.length,
     tags: tags.lines.length,
     ms: Date.now() - started,
@@ -81,7 +93,14 @@ async function handleFeed(params: URLSearchParams, res: ServerResponse): Promise
   );
 }
 
-function handleRegister(body: string, res: ServerResponse): void {
+function handleRegister(req: IncomingMessage, body: string, res: ServerResponse): void {
+  const address = clientAddress(req);
+  if (!registrationLimiter.tryAcquire(address)) {
+    logRejected({ route: '/v1/register', status: 429, reason: 'register-rate-limit' });
+    send(res, 429, 'too many registrations');
+    return;
+  }
+
   const form = new URLSearchParams(body);
   const deviceId = (form.get('dev') ?? '').trim();
   const secret = (form.get('secret') ?? '').trim();
@@ -156,16 +175,21 @@ function handleClaim(
 }
 
 /**
- * Shared-key gate, when FEED_KEY is set. Compared in constant time out of habit
- * rather than necessity; the length check leaks nothing worth having.
+ * Client address as the reverse proxy saw it.
+ *
+ * The *last* X-Forwarded-For entry, not the first: nginx appends the peer address
+ * it observed, so a client sending its own X-Forwarded-For only pollutes the
+ * earlier entries. Taking the first would let anyone choose their own rate limit
+ * bucket.
  */
-function hasValidKey(req: IncomingMessage): boolean {
-  const expected = config.feedKey;
-  if (expected === '') return true;
-  const given = header(req, 'x-radar-key');
-  const a = Buffer.from(expected);
-  const b = Buffer.from(given);
-  return a.length === b.length && timingSafeEqual(a, b);
+function clientAddress(req: IncomingMessage): string {
+  const forwarded = header(req, 'x-forwarded-for');
+  if (forwarded !== '') {
+    const parts = forwarded.split(',');
+    const last = parts[parts.length - 1];
+    if (last !== undefined && last.trim() !== '') return last.trim();
+  }
+  return req.socket.remoteAddress ?? 'unknown';
 }
 
 function header(req: IncomingMessage, name: string): string {
@@ -225,20 +249,10 @@ const server = createServer((req, res) => {
       const url = new URL(req.url ?? '/', 'http://internal');
       const route = `${req.method ?? 'GET'} ${url.pathname}`;
 
-      // Healthcheck stays open: it runs from inside the container and Docker will
-      // not be sending a key.
       if (route === 'GET /healthz') {
         send(res, 200, 'ok');
         return;
       }
-
-      if (!hasValidKey(req)) {
-        // 404 rather than 401: a scanner learns nothing about what is here.
-        logRejected({ route, status: 404, reason: 'bad-key' });
-        send(res, 404, 'not found');
-        return;
-      }
-
       if (route === 'GET /') {
         send(res, 200, usage());
         return;
@@ -268,7 +282,7 @@ const server = createServer((req, res) => {
       const body = await readBody(req);
       switch (url.pathname) {
         case '/v1/register':
-          handleRegister(body, res);
+          handleRegister(req, body, res);
           return;
         case '/v1/tag':
           handleClaim(req, body, 'claim', '/v1/tag', res);
@@ -314,6 +328,7 @@ function usage(): string {
 const sweeper = setInterval(() => {
   const removed = store.sweep();
   sweepFeedCache();
+  registrationLimiter.sweep();
   if (removed > 0) logInfo('sweep', { expired: removed });
 }, config.sweepIntervalMs);
 sweeper.unref();

@@ -102,46 +102,60 @@ Radars point at the public hostname, not this address; see the next section.
 ## Putting it behind a reverse proxy
 
 Radars reach the server over the internet, so it sits behind a hostname on your
-domain. The container listens on plain HTTP; the proxy terminates TLS.
+domain. The container speaks plain HTTP; the proxy terminates TLS.
 
-**One thing will silently break tagging if you get it wrong: do not rewrite the
-path.** Writes are signed HMAC-SHA256 over `method\npath\ntimestamp\nbody`, so if
-the proxy serves the feed under a subpath and strips it, or normalises the URI, every
-signature stops matching and claims fail with 401 while the feed keeps working
-perfectly. Give the server its own hostname at the root, and note the missing
-trailing slash on `proxy_pass` below, which is what preserves the URI in nginx.
+### Nginx Proxy Manager
 
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name radar.example.com;
+Add a **Proxy Host**:
 
-    # your usual certificate directives here
+| Field | Value |
+|---|---|
+| Domain Names | `radar.example.com` |
+| Scheme | `http` |
+| Forward Hostname / IP | the Unraid host IP, or `plane-radar-feed` if NPM shares a docker network with it |
+| Forward Port | `8787` |
+| Block Common Exploits | on |
+| Websockets Support | off, nothing here uses them |
 
-    # Bodies are a couple of hundred bytes; anything larger is not from a radar.
-    client_max_body_size 8k;
+On the **SSL** tab request a Let's Encrypt certificate and turn on *Force SSL*.
 
-    location / {
-        # No trailing slash: passes the URI through untouched, which the request
-        # signatures depend on.
-        proxy_pass http://192.168.1.50:8787;
+That is the whole setup. Nothing else is required, and in particular **do not add a
+path or a custom location**: writes are signed HMAC-SHA256 over
+`method\npath\ntimestamp\nbody`, so anything that rewrites the URI makes every
+signature fail while the feed keeps working perfectly. Tagging returns 401 and
+nothing else looks wrong. A plain Proxy Host passes the URI through untouched, which
+is exactly what is needed; giving the server its own hostname at the root keeps it
+that way.
 
-        # Keep-alive to the upstream. The radar holds one connection open and
-        # sends its tag POST down the same socket as the feed GET, so closing it
-        # between requests throws away the reason the protocol is shaped this way.
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
+### Optional: a rate limit in NPM
 
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+The server already caps what actually matters (see below), so this is a blunt outer
+bound rather than the real defence. It needs two pieces in two different places,
+because `limit_req_zone` is an `http`-context directive and NPM's Advanced tab
+injects into a `server` block.
 
-        # A poll is worthless once the next one is due.
-        proxy_read_timeout 15s;
-        proxy_connect_timeout 5s;
-    }
-}
-```
+1. On the Unraid host, in NPM's appdata, create
+   `/mnt/user/appdata/NginxProxyManager/nginx/custom/http_top.conf`:
+
+   ```nginx
+   limit_req_zone $binary_remote_addr zone=radar:10m rate=4r/s;
+   ```
+
+   Create the `custom` directory if it is not there. NPM includes that file at the
+   top of the `http` block.
+
+2. In the Proxy Host's **Advanced** tab:
+
+   ```nginx
+   limit_req zone=radar burst=40 nodelay;
+   ```
+
+3. Restart the NPM container so nginx reloads. If a snippet is in the wrong context
+   nginx refuses to start and says so in the NPM log, so check it came back up.
+
+`4r/s` with a burst of 40 is deliberately generous. Several radars in one house share
+one public address, and each polls every 3 seconds, so a tight per-IP limit punishes
+exactly the setup this is for.
 
 Then build the firmware against the public hostname:
 
@@ -151,56 +165,51 @@ RADAR_FEED_URL=https://radar.example.com pio run -e local -t upload
 
 `https` is all the firmware needs to switch to TLS; there is no other change.
 
-### Locking it down
+## What is actually exposed
 
-`/v1/feed` is unsigned and `/v1/register` accepts anyone, which was fine on a LAN.
-On the public internet, a stranger who learns the hostname can spend your adsb.fi
-budget from your IP, and can register a device and fill `MAX_ACTIVE_TAGS` to crowd
-your tags out. They cannot touch your tags: release is owner-only.
+Anyone can build a radar and point it here, which is the intent. There is no shared
+key and nothing to onboard: flash, set your location, done.
 
-So every request carries a shared key. Generate one, then set it in three places:
+That is a deliberate choice about what is worth defending. The server proxies public
+data, holds at most 64 tag rows with a 30 minute TTL, and stores device
+registrations. What is in the database is random secrets, four-character handles and
+ICAO hexes; it never stores where any device is. Writes are signed per device, so
+nobody can claim under your handle or release your tags. There is no privileged
+path, no shell-out, no filesystem write from input, parameterised SQL only, and
+bodies are capped at 4 KB. The container runs unprivileged with only `/data`
+writable.
 
-```bash
-openssl rand -hex 24
-```
+So the risks worth bounding are availability, not compromise, and both are bounded
+by limits rather than by secrets:
 
-1. **The server**, as `FEED_KEY`. Requests without it get a flat 404, which tells a
-   scanner nothing. `/healthz` stays open so the container healthcheck still works.
-2. **The proxy**, so unauthorised traffic never reaches the container at all:
+**Getting your address rate limited by adsb.fi.** They allow 1 request/second per
+IP. Cell sharing helps but does not enforce it, because one client asking about many
+different cells multiplies upstream fetches without making many requests. So
+`UPSTREAM_MIN_INTERVAL_MS` caps the fetch rate where the fetches happen, across all
+clients. When it refuses, a cell up to `MAX_STALE_SECONDS` old is served instead:
+slightly old aircraft beat both a failed poll and a restricted address. If no cached
+cell exists, the request 502s, the firmware counts a proxy failure and falls back to
+adsb.fi directly, which is the correct outcome.
 
-   ```nginx
-   # In the server block, before location /
-   if ($http_x_radar_key != "the-same-value") { return 404; }
-   ```
+**Tag crowding.** `MAX_TAGS_PER_DEVICE` (10) caps how many aircraft one device holds
+at once. It is a concurrency cap, not a rate limit: an expired or released tag frees
+its slot immediately, and refreshing a tag you already hold consumes nothing.
+`REGISTRATIONS_PER_HOUR_PER_IP` stops anyone minting identities in bulk to get
+around it. If someone does abuse it anyway, the escalation is deleting their rows
+from `devices`, which is reactive and about right at this scale.
 
-3. **The firmware**, at build time:
+Watch it with `docker logs`. A steady stream of `upstream=stale` means the interval
+limiter is being hit; repeated `register-rate-limit` or `at-device-limit` means
+someone is pushing.
 
-   ```bash
-   RADAR_FEED_URL=https://radar.example.com \
-   RADAR_FEED_KEY=the-same-value \
-   pio run -e local -t upload
-   ```
+A proxy-level rate limit is worth adding on top as a blunt outer bound against
+traffic that never reaches useful work; see the NPM steps above.
 
-Checking it in both the proxy and the server is deliberate: the proxy config is the
-thing most likely to be edited by hand a year from now, and the server-side check is
-what keeps the gate closed when that happens.
-
-Be clear about what this is. Anyone holding a firmware binary can extract the key, so
-it is worth as much as keeping your binaries to yourself. It stops opportunistic use
-of an endpoint someone stumbles across, which is the actual exposure here, and it is
-not a defence against someone who wants in.
-
-Curl needs the header too once this is on:
-
-```bash
-curl -H "X-Radar-Key: the-same-value" "https://radar.example.com/v1/tags"
-```
-
-Also note the firmware calls `setInsecure()`, so it does not verify the server's
+Note the firmware calls `setInsecure()`, so it does not verify the server's
 certificate. Over a LAN that hardly mattered; over the internet it means a
 machine-in-the-middle could impersonate the server, collect a device secret and feed
-false tags. Fixing it means embedding a CA bundle in the firmware, with its own
-maintenance cost when roots rotate, so it is a known gap rather than an oversight.
+false tags. Fixing it means embedding a CA bundle, with its own maintenance cost when
+roots rotate, so it is a known gap rather than an oversight.
 
 ## Configuration
 
@@ -212,9 +221,13 @@ All optional; the defaults suit a home server.
 | `HOST` | `0.0.0.0` | Must stay `0.0.0.0` inside a container |
 | `DB_PATH` | `/data/tags.db` | Keep on a mounted volume |
 | `LOCK_SECONDS` | `1800` | How long a claim holds an aircraft |
-| `CLAIMS_PER_HOUR` | `10` | Per device; refreshes count |
-| `MAX_ACTIVE_TAGS` | `64` | Also bounds the response size |
-| `FEED_CACHE_SECONDS` | `4` | Floor on upstream fetches per map cell |
+| `MAX_TAGS_PER_DEVICE` | `10` | Concurrent tags per device; expiry frees a slot |
+| `MAX_FEED_TAGS` | `64` | Response size bound only, never refuses a claim. Must not exceed the firmware's `kMaxFeedTags` |
+| `FEED_CACHE_SECONDS` | `4` | Cache TTL per map cell |
+| `UPSTREAM_MIN_INTERVAL_MS` | `1000` | Hard floor between adsb.fi fetches, all clients |
+| `MAX_STALE_SECONDS` | `60` | How old a cell may be when the limiter refuses a fetch |
+| `REGISTRATIONS_PER_HOUR_PER_IP` | `5` | |
+| `PUID` / `PGID` | `99` / `100` | Owner applied to `/data` at startup |
 | `ADSB_BASE` | `https://opendata.adsb.fi/api/v3` | |
 | `MAX_CLOCK_SKEW_SECONDS` | `600` | The ESP32 has no RTC and drifts |
 | `UPSTREAM_TIMEOUT_MS` | `8000` | |
@@ -224,11 +237,25 @@ is told, so all of it changes with a container restart rather than a reflash.
 
 ## Staying inside adsb.fi's limits
 
-Their public endpoints allow 1 request/second per IP. The aircraft block is keyed on
-a **quantised** centre (0.05 degree cells, about 5.5 km), so every radar in the same
-neighbourhood shares one cache entry and therefore one upstream fetch. Upstream rate
-is bounded by `(populated cells) / FEED_CACHE_SECONDS`, not by how many radars you
-own. Raise `FEED_CACHE_SECONDS` before adding radars in scattered locations.
+Their public endpoints allow 1 request/second per IP, and every fetch from here
+leaves one address, so this is the limit worth being careful about.
+
+Two things keep us inside it. The aircraft block is keyed on a **quantised** centre
+(0.05 degree cells, about 5.5 km), so every radar in the same neighbourhood shares
+one cache entry and therefore one upstream fetch: cost scales with populated cells
+rather than with how many radars you own. Measured with two radars polling every 3s,
+68 requests produced 21 fetches.
+
+Cell sharing alone is not a guarantee, though, because one client asking about many
+scattered cells multiplies fetches without making many requests. So
+`UPSTREAM_MIN_INTERVAL_MS` is a hard floor between fetches across all clients. When
+it refuses, a cell up to `MAX_STALE_SECONDS` old is served and the log line reads
+`upstream=stale`; if there is no cached cell at all the request 502s and the radar
+falls back to adsb.fi on its own.
+
+A steady stream of `upstream=stale` means the floor is being hit. Raising
+`FEED_CACHE_SECONDS` is the first thing to try, since it makes each fetch serve more
+requests.
 
 Their terms also restrict the data to personal, non-commercial use and require
 attribution, which is why `GET /` carries the credit.

@@ -40,8 +40,6 @@ interface DeviceRow {
   id: string;
   secret: string;
   handle: string;
-  claims: number;
-  window_start: number;
 }
 
 interface TagRow {
@@ -91,16 +89,20 @@ export class TagStore {
       claimed_at INTEGER NOT NULL,
       expires_at INTEGER NOT NULL
     )`);
+    // No claim counters: the per-device limit is a count of unexpired rows in `tags`,
+    // so it needs no bookkeeping here and cannot drift out of step with reality.
+    // Databases created before this may still carry unused claims/window_start
+    // columns, which is harmless.
     this.db.exec(`CREATE TABLE IF NOT EXISTS devices (
-      id           TEXT PRIMARY KEY,
-      secret       TEXT NOT NULL,
-      handle       TEXT NOT NULL,
-      created_at   INTEGER NOT NULL,
-      claims       INTEGER NOT NULL DEFAULT 0,
-      window_start INTEGER NOT NULL DEFAULT 0
+      id         TEXT PRIMARY KEY,
+      secret     TEXT NOT NULL,
+      handle     TEXT NOT NULL,
+      created_at INTEGER NOT NULL
     )`);
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS devices_handle ON devices (handle)');
     this.db.exec('CREATE INDEX IF NOT EXISTS tags_expiry ON tags (expires_at)');
+    // The per-device cap counts unexpired rows for one device on every claim.
+    this.db.exec('CREATE INDEX IF NOT EXISTS tags_device ON tags (device, expires_at)');
   }
 
   close(): void {
@@ -129,7 +131,7 @@ export class TagStore {
         `SELECT icao, handle, expires_at FROM tags
          WHERE expires_at > ? ORDER BY claimed_at DESC LIMIT ?`,
       )
-      .all(now, config.maxActiveTags) as unknown as TagRow[];
+      .all(now, config.maxFeedTags) as unknown as TagRow[];
 
     this.snapshot = {
       lines: rows.map((r) => tagLine({ icao: r.icao, handle: r.handle, ttl: r.expires_at - now })),
@@ -227,24 +229,23 @@ export class TagStore {
       };
     }
 
-    // Refreshes count too, or one device can hold a tag forever for free.
-    const windowStart = now - (now % 3600);
-    const claims = device.window_start === windowStart ? device.claims : 0;
-    if (claims >= config.claimsPerHour) {
-      return {
-        status: 429,
-        body: `rate limited\nretry=${windowStart + 3600 - now}`,
-        handle: device.handle,
-        detail: 'rate-limited',
-      };
-    }
-
+    // Concurrency cap, counted from the table rather than a stored tally, so an
+    // expired tag stops occupying a slot the moment it expires. Refreshing a tag
+    // this device already holds is exempt: it consumes no new slot.
+    //
+    // No global cap: a claim is never refused because other people hold tags, which
+    // is what the old table-full check did.
     if (held === undefined) {
-      const active = this.db
-        .prepare('SELECT COUNT(*) AS n FROM tags WHERE expires_at > ?')
-        .get(now) as { n: number };
-      if (active.n >= config.maxActiveTags) {
-        return { status: 507, body: 'tag table full', detail: 'table-full' };
+      const mine = this.db
+        .prepare('SELECT COUNT(*) AS n FROM tags WHERE device = ? AND expires_at > ?')
+        .get(deviceId, now) as { n: number };
+      if (mine.n >= config.maxTagsPerDevice) {
+        return {
+          status: 429,
+          body: `tag limit reached\nheld=${mine.n}\nmax=${config.maxTagsPerDevice}`,
+          handle: device.handle,
+          detail: `at-device-limit:${mine.n}`,
+        };
       }
     }
 
@@ -259,10 +260,6 @@ export class TagStore {
            expires_at = excluded.expires_at`,
       )
       .run(icao, device.handle, deviceId, now, now + config.lockSeconds);
-    this.db
-      .prepare('UPDATE devices SET claims = ?, window_start = ? WHERE id = ?')
-      .run(claims + 1, windowStart, deviceId);
-
     this.snapshot = null;
     return {
       status: 200,
