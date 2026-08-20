@@ -113,9 +113,14 @@ jobs:
             fi
           done
           # "latest" alias so the page has a stable fallback if versions.json fails.
-          if [ ${#versions[@]} -gt 0 ]; then
-            cp -r "site/firmware/${versions[0]}" "site/firmware/latest"
+          # printf runs its format once even with no arguments, so an empty array
+          # would emit a blank line and publish [""] -- which index.html accepts as
+          # a real version and then wires both install buttons to no manifest.
+          if [ ${#versions[@]} -eq 0 ]; then
+            echo "::error::No release produced a flashable asset; refusing to publish an empty installer"
+            exit 1
           fi
+          cp -r "site/firmware/${versions[0]}" "site/firmware/latest"
           printf '%s\n' "${versions[@]}" | jq -R . | jq -s . > site/versions.json
           echo "Published versions:" && cat site/versions.json
 

@@ -25,6 +25,7 @@ static volatile bool s_boot_is_down = false;
 static volatile unsigned long s_boot_down_ms = 0;
 static volatile unsigned long s_last_tap_ms = 0;
 static bool s_long_press_handled = false;
+static bool s_long_press_enabled = true;
 static bool s_boot_interrupt_attached = false;
 
 static void IRAM_ATTR onBootButtonIsr() {
@@ -450,6 +451,19 @@ unsigned long bootButtonHeldMs() {
   return millis() - down_ms;
 }
 
+void bootButtonSetLongPressEnabled(bool enabled) {
+  if (enabled == s_long_press_enabled) {
+    return;
+  }
+  s_long_press_enabled = enabled;
+  // Re-arming mid-press must not instantly trip the reset: the press that was
+  // held through the disarmed window (e.g. the hold that opened the menu) is
+  // treated as already handled, so only a fresh press can reach the threshold.
+  if (enabled && bootButtonIsHeld()) {
+    s_long_press_handled = true;
+  }
+}
+
 void bootButtonPollLongPress() {
   if (wifiBootButtonPressed()) {
     portENTER_CRITICAL(&s_boot_mux);
@@ -460,7 +474,7 @@ void bootButtonPollLongPress() {
     const unsigned long down_ms = s_boot_down_ms;
     portEXIT_CRITICAL(&s_boot_mux);
 
-    if (!s_long_press_handled &&
+    if (s_long_press_enabled && !s_long_press_handled &&
         millis() - down_ms >= config::kBootResetHoldMs) {
       s_long_press_handled = true;
       Serial.println("BOOT held, resetting WiFi");
@@ -500,7 +514,6 @@ void wifiLoop() {
       stopLanWebPortal();
     }
     if (s_wm.getWebPortalActive() || s_wm.getConfigPortalActive()) {
-      bootButtonPollLongPress();
       s_wm.process();
     }
   } else {

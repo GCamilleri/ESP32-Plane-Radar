@@ -10,6 +10,7 @@
 #include "config.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
+#include "ui/text_fit.h"
 
 #ifndef BUILD_GIT_HASH
 #define BUILD_GIT_HASH "dev"
@@ -121,16 +122,23 @@ void fitSsidLine() {
   if (tft.textWidth(s_ssid_line) <= kConnectingTextMaxWidthPx) {
     return;
   }
-  const size_t len = strlen(s_connecting_ssid);
-  for (size_t n = len; n > 0; --n) {
-    snprintf(s_ssid_line, sizeof(s_ssid_line), "%.*s…", static_cast<int>(n),
-             s_connecting_ssid);
-    if (tft.textWidth(s_ssid_line) <= kConnectingTextMaxWidthPx) {
+  // Shrink a whole character at a time. buildEllipsized reports how many source
+  // bytes survived the UTF-8 boundary snap, so the next budget starts inside the
+  // last surviving character and drops it entirely.
+  size_t budget = strlen(s_connecting_ssid);
+  for (;;) {
+    const int copied = ui::text::buildEllipsized(
+        s_ssid_line, sizeof(s_ssid_line), s_connecting_ssid, budget);
+    if (copied < 0) {
+      s_ssid_line[0] = '\0';
       return;
     }
+    if (copied == 0 ||
+        tft.textWidth(s_ssid_line) <= kConnectingTextMaxWidthPx) {
+      return;
+    }
+    budget = static_cast<size_t>(copied) - 1;
   }
-  strncpy(s_ssid_line, "…", sizeof(s_ssid_line) - 1);
-  s_ssid_line[sizeof(s_ssid_line) - 1] = '\0';
 }
 
 void drawConnectingText() {

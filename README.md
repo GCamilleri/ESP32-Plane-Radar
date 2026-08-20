@@ -89,15 +89,17 @@ All interaction is through the **BOOT button** (GPIO 9):
 |--------|--------|
 | **Tap** | Cycle range (5 / 10 / 15 / 25 km) |
 | **Hold ~1s** | Open settings menu |
-| **Hold 3s** | Reset WiFi credentials and reboot into setup |
+| **Hold 3s** (setup or connecting screen) | Reset WiFi credentials and reboot into setup |
 
 In the settings menu, **tap** moves to the next item and **hold** selects or goes back. The menu pages automatically and closes after 4 seconds of inactivity.
+
+Once the radar is up, a hold opens the menu at 1s, so the 3s reset does not apply there: use the menu's **Reset WiFi** entry instead. The 3s hold is for the setup and connecting screens, where there is no menu to open.
 
 ## Troubleshooting
 
 - **Board not detected** -- use a data-capable USB-C cable, not charge-only
 - **Permission denied (Linux)** -- `sudo usermod -aG dialout $USER` then log out/in
-- **WiFi won't connect** -- hold BOOT for 3+ seconds to reset and re-enter setup
+- **WiFi won't connect** -- hold BOOT for 3+ seconds on the connecting screen to reset and re-enter setup, or use **Reset WiFi** in the settings menu
 - **No aircraft shown** -- check your coordinates are correct; center dot turns red if fetches are failing
 
 ## Dependencies

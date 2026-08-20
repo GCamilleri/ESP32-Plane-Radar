@@ -22,5 +22,12 @@ uint8_t bootButtonConsumeGesture();
 bool bootButtonIsHeld();
 /** How long (ms) the current press has been held; 0 if not held. */
 unsigned long bootButtonHeldMs();
-/** Call each loop iteration; triggers WiFi reset on long hold. */
+/**
+ * Arm or disarm the hold-to-reset gesture. Disarm it wherever a hold already
+ * means something else (the settings menu selects on a 1 s hold), or a slightly
+ * long press there would erase the user's credentials. Re-arming never fires on
+ * the press that is already in progress.
+ */
+void bootButtonSetLongPressEnabled(bool enabled);
+/** Call each loop iteration; triggers WiFi reset on long hold when armed. */
 void bootButtonPollLongPress();
