@@ -20,6 +20,7 @@ constexpr char kPrefsLabelModeKey[] = "labels";
 constexpr char kPrefsPollRateKey[] = "pollRate";
 constexpr char kPrefsSweepKey[] = "sweep";
 constexpr char kPrefsMilKey[] = "mil";
+constexpr char kPrefsWebPortalKey[] = "webportal";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
 constexpr unsigned long kPollRatePresetsMs[] = {3000, 5000, 10000};
@@ -34,6 +35,7 @@ uint8_t s_label_mode = 0;
 uint8_t s_poll_rate_index = kDefaultPollRateIndex;
 bool s_sweep_enabled = true;
 bool s_military_highlight = true;
+bool s_web_portal_enabled = false;
 
 template <typename T>
 void nvsPut(const char* ns, const char* key, T value);
@@ -100,6 +102,8 @@ void rangeInit() {
   s_sweep_enabled = s_prefs.getBool(kPrefsSweepKey, true);
 
   s_military_highlight = s_prefs.getBool(kPrefsMilKey, true);
+
+  s_web_portal_enabled = s_prefs.getBool(kPrefsWebPortalKey, false);
 
   s_prefs.end();
 }
@@ -210,6 +214,13 @@ bool militaryHighlight() { return s_military_highlight; }
 void setMilitaryHighlight(bool enabled) {
   s_military_highlight = enabled;
   nvsPut<bool>(kPrefsNamespace, kPrefsMilKey, enabled);
+}
+
+bool webPortalEnabled() { return s_web_portal_enabled; }
+
+void setWebPortalEnabled(bool enabled) {
+  s_web_portal_enabled = enabled;
+  nvsPut<bool>(kPrefsNamespace, kPrefsWebPortalKey, enabled);
 }
 
 }  // namespace ui::radar

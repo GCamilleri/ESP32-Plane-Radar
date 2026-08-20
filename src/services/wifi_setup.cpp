@@ -490,8 +490,14 @@ bool wifiReconnect() {
 void wifiLoop() {
   ensureWifiManager();
   if (wifiLinkUp()) {
-    if (!s_wm.getWebPortalActive() && !s_wm.getConfigPortalActive()) {
-      startLanWebPortal();
+    // LAN web portal is gated by the on-device menu toggle. Only the LAN web
+    // portal is managed here; an active first-time config portal is left alone.
+    if (ui::radar::webPortalEnabled()) {
+      if (!s_wm.getWebPortalActive() && !s_wm.getConfigPortalActive()) {
+        startLanWebPortal();
+      }
+    } else if (s_wm.getWebPortalActive()) {
+      stopLanWebPortal();
     }
     if (s_wm.getWebPortalActive() || s_wm.getConfigPortalActive()) {
       bootButtonPollLongPress();

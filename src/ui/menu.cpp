@@ -32,6 +32,7 @@ const char* const kRunwayModeLabels[] = {"Off", "Large", "Medium", "All"};
 const char* const kPollRateLabels[] = {"3s", "5s", "10s"};
 const char* const kSweepLabels[] = {"Off", "On"};
 const char* const kMilitaryLabels[] = {"Off", "On"};
+const char* const kWebPortalLabels[] = {"Off", "On"};
 
 uint8_t getRange() { return radar::rangeIndex(); }
 void setRange(uint8_t v) { radar::setRangeIndex(v); }
@@ -51,8 +52,11 @@ void setSweep(uint8_t v) { radar::setSweepEnabled(v == 1); }
 uint8_t getMilitary() { return radar::militaryHighlight() ? 1 : 0; }
 void setMilitary(uint8_t v) { radar::setMilitaryHighlight(v == 1); }
 
+uint8_t getWebPortal() { return radar::webPortalEnabled() ? 1 : 0; }
+void setWebPortal(uint8_t v) { radar::setWebPortalEnabled(v == 1); }
+
 constexpr size_t kHeadingIndex = 1;
-constexpr size_t kSettingCount = 7;
+constexpr size_t kSettingCount = 8;
 constexpr size_t kResetWifiIndex = kSettingCount;
 constexpr size_t kMenuItemCount = kSettingCount + 1;
 
@@ -67,6 +71,7 @@ const MenuItem kMenuItems[kSettingCount] = {
      getPollRate, setPollRate},
     {"Military", 2, kMilitaryLabels, getMilitary, setMilitary},
     {"Sweep", 2, kSweepLabels, getSweep, setSweep},
+    {"WiFi Cfg", 2, kWebPortalLabels, getWebPortal, setWebPortal},
 };
 
 const char* compassDir(uint16_t deg) {
