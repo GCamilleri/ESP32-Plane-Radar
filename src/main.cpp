@@ -125,6 +125,28 @@ void handleAsyncFetchResult() {
       ++g_consecutive_fetch_failures;
     }
     ui::radarDisplaySetFetchFailures(g_consecutive_fetch_failures);
+
+    // Heap with the failure, not on request: the failure that matters here is
+    // mbedTLS being unable to allocate a session, and largest-free-block is the
+    // number that shows it. Logged sparsely, since this repeats every poll.
+    if (g_consecutive_fetch_failures == 1 || g_consecutive_fetch_failures == 5 ||
+        g_consecutive_fetch_failures % 20 == 0) {
+      Serial.printf("adsb: %u consecutive failures, heap %u free, %u largest\n",
+                    static_cast<unsigned>(g_consecutive_fetch_failures),
+                    static_cast<unsigned>(ESP.getFreeHeap()),
+                    static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    }
+
+    // Reboot rather than sit there dead. A cold boot gets an unfragmented heap,
+    // which is the one thing that reliably clears the mbedTLS allocation failure,
+    // and it is the same self-heal the WiFi path already has. Gated on the link
+    // being up so a WiFi outage stays with its own timer.
+    if (g_consecutive_fetch_failures >= config::kFetchFailuresBeforeReboot &&
+        WiFi.status() == WL_CONNECTED) {
+      Serial.println("adsb: every fetch failing, rebooting to recover");
+      delay(100);
+      esp_restart();
+    }
   }
 }
 
@@ -154,6 +176,13 @@ void setup() {
   if (wifiSetupConnect()) {
     showRadarIfConnected();
   }
+
+  // After the first render, so the frame sprite's ~115 KB is already taken: this is
+  // the headroom a TLS handshake actually gets, and the number to compare against
+  // when a fetch later fails to allocate one.
+  Serial.printf("heap after boot: %u free, %u largest\n",
+                static_cast<unsigned>(ESP.getFreeHeap()),
+                static_cast<unsigned>(ESP.getMaxAllocHeap()));
 }
 
 void loop() {

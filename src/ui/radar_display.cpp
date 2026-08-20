@@ -437,11 +437,6 @@ struct AircraftDrawItem {
   int x = 0;
   int y = 0;
   int dist_sq = 0;
-  // Smoothed attitude, carried from the projection pass so the symbol pass does
-  // not have to look the aircraft up in the motion table a second time.
-  float nose_deg = 0.0f;
-  float track_deg = 0.0f;
-  float gs_knots = 0.0f;
 };
 
 struct BeyondDotDrawItem {
@@ -466,31 +461,16 @@ struct LabelPlacement {
 static LabelPlacement s_label_placements[services::adsb::kMaxAircraft];
 static size_t s_label_count = 0;
 
-// Which of the four candidate sides each aircraft's label took last frame.
+// Which of the four candidate sides each aircraft's label took last frame lives in
+// the motion table, keyed by ICAO alongside its position.
 //
 // Needed only because the symbols move continuously now: when two candidates are
 // near enough to tied, whichever wins flips from frame to frame and the label
 // visibly flickers between two sides of the aeroplane. Last frame's side is kept
 // unless another beats it by a clear margin.
-struct LabelChoice {
-  uint32_t icao;
-  uint8_t candidate;
-};
-static LabelChoice s_label_choice[services::adsb::kMaxAircraft];
-static LabelChoice s_prev_label_choice[services::adsb::kMaxAircraft];
-static size_t s_label_choice_count = 0;
-static size_t s_prev_label_choice_count = 0;
-
 int previousLabelCandidate(uint32_t icao) {
-  if (icao == 0) {
-    return -1;
-  }
-  for (size_t i = 0; i < s_prev_label_choice_count; ++i) {
-    if (s_prev_label_choice[i].icao == icao) {
-      return s_prev_label_choice[i].candidate;
-    }
-  }
-  return -1;
+  const uint8_t side = motion::labelSide(icao);
+  return side == motion::kNoLabelSide ? -1 : static_cast<int>(side);
 }
 
 int overlapArea(int16_t ax, int16_t ay, int16_t aw, int16_t ah,
@@ -502,12 +482,6 @@ int overlapArea(int16_t ax, int16_t ay, int16_t aw, int16_t ah,
 
 void resolveLabels(size_t draw_count) {
   s_label_count = 0;
-
-  for (size_t i = 0; i < s_label_choice_count; ++i) {
-    s_prev_label_choice[i] = s_label_choice[i];
-  }
-  s_prev_label_choice_count = s_label_choice_count;
-  s_label_choice_count = 0;
 
   initTagLabelMetrics();
   applyTagStyle();
@@ -600,13 +574,8 @@ void resolveLabels(size_t draw_count) {
       best_candidate = sticky;
     }
 
-    if (s_label_choice_count < services::adsb::kMaxAircraft &&
-        planes[i].icao != 0) {
-      s_label_choice[s_label_choice_count].icao = planes[i].icao;
-      s_label_choice[s_label_choice_count].candidate =
-          static_cast<uint8_t>(best_candidate);
-      ++s_label_choice_count;
-    }
+    motion::setLabelSide(planes[i].icao,
+                         static_cast<uint8_t>(best_candidate));
 
     auto& placement = s_label_placements[s_label_count];
     placement.x = candidates[best_candidate].x;
@@ -737,9 +706,6 @@ void drawAircraft() {
       s_draw_items[draw_count].x = x;
       s_draw_items[draw_count].y = y;
       s_draw_items[draw_count].dist_sq = geo::distSqFromCenter(x, y);
-      s_draw_items[draw_count].nose_deg = moved.nose_deg;
-      s_draw_items[draw_count].track_deg = moved.track_deg;
-      s_draw_items[draw_count].gs_knots = moved.gs_knots;
       ++draw_count;
       continue;
     }
@@ -791,10 +757,15 @@ void drawAircraft() {
         mil ? radar::gColorMilitary : radar::gColorAircraft;
     const uint16_t vector_color =
         mil ? radar::gColorMilitary : radar::gColorTrackVector;
-    drawSpeedVector(x, y, s_draw_items[d].nose_deg - h_deg,
-                    s_draw_items[d].track_deg - h_deg,
-                    s_draw_items[d].gs_knots, vector_color);
-    drawHeadingTriangle(x, y, s_draw_items[d].nose_deg - h_deg, symbol_color);
+    // Looked up again rather than cached in the draw item: three floats per
+    // aircraft is 768 bytes of static RAM, and on this board that RAM comes out of
+    // the heap mbedTLS needs for its handshakes. A second scan of a 64-entry table
+    // is far cheaper than the headroom.
+    const motion::Motion moved =
+        smooth ? motion::stateFor(planes[i]) : reported(planes[i]);
+    drawSpeedVector(x, y, moved.nose_deg - h_deg, moved.track_deg - h_deg,
+                    moved.gs_knots, vector_color);
+    drawHeadingTriangle(x, y, moved.nose_deg - h_deg, symbol_color);
 
     // A tagged aircraft keeps its normal symbol and gains a reticle. Recolouring
     // the symbol would hide whether it is military, which is the one thing the

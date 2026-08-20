@@ -166,6 +166,54 @@ TEST_CASE("track is smoothed the short way round the compass") {
   CHECK(((nose > 350.0f && nose <= 360.0f) || (nose >= 0.0f && nose < 10.0f)));
 }
 
+TEST_CASE("a heading reaches its target exactly, despite quantised storage") {
+  // Attitude is stored in deci-degrees and knots to save RAM, so a filter step can
+  // round to nothing. Without a snap, the drawn value stalls a fraction short of
+  // the target and stays there for as long as the aircraft is on screen.
+  motion::reset();
+  Aircraft plane = northbound(0xABC123);
+  plane.nose_deg = 90.0f;
+  plane.track_deg = 90.0f;
+  plane.gs_knots = 300.0f;
+  motion::onSnapshot(&plane, 1, 1000, 0);
+  motion::advance(1000);
+
+  plane.nose_deg = 91.0f;
+  plane.track_deg = 91.0f;
+  plane.gs_knots = 301.0f;
+  motion::onSnapshot(&plane, 1, 1000, 0);
+  runFrames(1000, 3.0f);
+
+  const motion::Motion state = motion::stateFor(plane);
+  CHECK(state.nose_deg == doctest::Approx(91.0f).epsilon(0.002));
+  CHECK(state.track_deg == doctest::Approx(91.0f).epsilon(0.002));
+  CHECK(state.gs_knots == doctest::Approx(301.0f).epsilon(0.005));
+}
+
+TEST_CASE("label sides persist per aircraft and reset with the table") {
+  motion::reset();
+  const Aircraft first = northbound(0xABC123);
+  const Aircraft second = northbound(0xDEF456);
+  Aircraft both[2] = {first, second};
+  motion::onSnapshot(both, 2, 1000, 0);
+
+  CHECK(motion::labelSide(0xABC123) == motion::kNoLabelSide);
+  motion::setLabelSide(0xABC123, 2);
+  CHECK(motion::labelSide(0xABC123) == 2);
+  CHECK(motion::labelSide(0xDEF456) == motion::kNoLabelSide);
+
+  // An untracked aircraft has no side, and asking cannot create one.
+  CHECK(motion::labelSide(0x999999) == motion::kNoLabelSide);
+  motion::setLabelSide(0x999999, 1);
+  CHECK(motion::labelSide(0x999999) == motion::kNoLabelSide);
+
+  // A slot reused by a different aircraft starts with no side of its own.
+  const Aircraft third = northbound(0x111111);
+  motion::onSnapshot(&third, 1, 4000, 0);
+  CHECK(motion::labelSide(0xABC123) == motion::kNoLabelSide);
+  CHECK(motion::labelSide(0x111111) == motion::kNoLabelSide);
+}
+
 TEST_CASE("aircraft that leave the feed give their slots back") {
   motion::reset();
 

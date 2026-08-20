@@ -82,6 +82,18 @@ constexpr unsigned long kAdsbFetchIntervalMs = 3000;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
 constexpr bool kAdsbShowGroundAircraft = false;
 
+/**
+ * Consecutive failed fetches before the device reboots to recover.
+ *
+ * The counterpart to kWifiRebootAfterDownMs, for the failure where WiFi is fine and
+ * every fetch still fails. Observed in the wild as mbedTLS refusing to allocate its
+ * session buffers (-32512) on a fragmented heap: both the feed and the adsb.fi
+ * fallback are HTTPS, so the radar loses every source and freezes on its last frame
+ * with a red centre dot, indefinitely, because nothing was watching for it. At the
+ * default 3s poll this is about three minutes.
+ */
+constexpr uint8_t kFetchFailuresBeforeReboot = 60;
+
 // --- Social aircraft tags (self-hosted feed server, see server/) ---
 /**
  * Feed server base URL, no trailing slash. Empty builds a device with no social

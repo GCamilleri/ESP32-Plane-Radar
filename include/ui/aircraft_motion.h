@@ -60,6 +60,19 @@ void advance(uint32_t now_ms);
 /** Smoothed state for `plane`, or its reported state when it is not tracked. */
 Motion stateFor(const services::adsb::Aircraft& plane);
 
+/**
+ * Which of the four candidate sides an aircraft's label took last frame, and a
+ * setter for this frame's choice. kNoLabelSide means "no previous choice".
+ *
+ * A display concern parked in the motion table on purpose: it needs to persist per
+ * aircraft across frames and be keyed by ICAO, which is exactly what this table
+ * already is. The alternative was a second 64-entry table beside it, and RAM here
+ * comes out of the heap that mbedTLS needs for its handshakes.
+ */
+constexpr uint8_t kNoLabelSide = 0xFF;
+uint8_t labelSide(uint32_t icao);
+void setLabelSide(uint32_t icao, uint8_t side);
+
 /** Drop every entry. Also resets the frame clock. */
 void reset();
 
