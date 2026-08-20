@@ -14,7 +14,10 @@
 
 #include "config.h"
 #include "data/military_ranges.h"
+#include "services/adsb_feed.h"
 #include "services/adsb_parse.h"
+#include "services/social_tags.h"
+#include "ui/radar_range.h"
 
 namespace services::adsb {
 
@@ -201,6 +204,157 @@ void drainRemainder(WiFiClient* stream, int content_length, size_t consumed,
 
 float kmToNauticalMiles(float km) { return km / kKmPerNm; }
 
+// Line-oriented sibling of StreamJsonReader for the PR1 proxy format. Same
+// discipline: a small staging buffer, the poll hook kept fed, a wall-clock
+// deadline, and a clean EOF once Content-Length is consumed so the keep-alive
+// socket stays reusable.
+class StreamLineReader {
+ public:
+  StreamLineReader(WiFiClient* stream, int content_length,
+                   unsigned long deadline_ms)
+      : stream_(stream),
+        remaining_(content_length),
+        have_len_(content_length > 0),
+        deadline_(deadline_ms) {}
+
+  /** Next line into `out`, without its newline. False at EOF or deadline. */
+  bool nextLine(char* out, size_t out_len) {
+    size_t n = 0;
+    bool any = false;
+    for (;;) {
+      if (pos_ >= len_ && !refill()) {
+        break;
+      }
+      any = true;
+      const char c = buf_[pos_++];
+      if (c == '\n') {
+        break;
+      }
+      if (n + 1 < out_len) {
+        out[n++] = c;
+      }
+      // Past out_len the rest of an over-long line is dropped, which turns it
+      // into a parse failure rather than a buffer overrun.
+    }
+    out[n] = '\0';
+    return any;
+  }
+
+  size_t bytesConsumed() const { return consumed_; }
+
+ private:
+  bool refill() {
+    pos_ = 0;
+    len_ = 0;
+    for (;;) {
+      if (have_len_ && remaining_ <= 0) {
+        return false;
+      }
+      pollNetwork();
+      const int available = stream_->available();
+      if (available > 0) {
+        int to_read = available > static_cast<int>(sizeof(buf_))
+                          ? static_cast<int>(sizeof(buf_))
+                          : available;
+        if (have_len_ && to_read > remaining_) {
+          to_read = remaining_;
+        }
+        const int n = stream_->read(reinterpret_cast<uint8_t*>(buf_), to_read);
+        if (n > 0) {
+          len_ = n;
+          consumed_ += static_cast<size_t>(n);
+          if (have_len_) {
+            remaining_ -= n;
+          }
+          return true;
+        }
+      }
+      if (!stream_->connected() && stream_->available() <= 0) {
+        return false;
+      }
+      if (static_cast<long>(millis() - deadline_) >= 0) {
+        return false;
+      }
+      delay(1);
+    }
+  }
+
+  WiFiClient* stream_;
+  int remaining_;
+  bool have_len_;
+  unsigned long deadline_;
+  char buf_[512];
+  int pos_ = 0;
+  int len_ = 0;
+  size_t consumed_ = 0;
+};
+
+/** Tags carried in one feed response. The Worker caps its own list at 64. */
+constexpr size_t kMaxFeedTags = 64;
+
+FeedSource s_last_source = FeedSource::kDirect;
+uint8_t s_proxy_failures = 0;
+unsigned long s_proxy_backoff_until = 0;
+bool s_proxy_backed_off = false;
+
+bool proxyConfigured() { return config::kFeedProxyBaseUrl[0] != '\0'; }
+
+/**
+ * Whether this poll should go through the Worker. The proxy is the feed whenever
+ * one is configured; adsb.fi is only ever a fallback, never a mode the user picks.
+ *
+ * Backing off after repeated failures is what keeps the standalone promise: a
+ * dead, misconfigured or over-quota proxy costs one poll cycle, then the radar
+ * returns to adsb.fi on its own and retries the proxy later. The Social menu
+ * toggle governs taking part in tagging, not where aircraft come from.
+ */
+bool shouldUseProxy() {
+  if (!proxyConfigured()) {
+    return false;
+  }
+  if (!s_proxy_backed_off) {
+    return true;
+  }
+  if (static_cast<long>(millis() - s_proxy_backoff_until) >= 0) {
+    s_proxy_backed_off = false;
+    s_proxy_failures = 0;
+    Serial.println("adsb: retrying the tag proxy");
+    return true;
+  }
+  return false;
+}
+
+void noteProxyFailure() {
+  if (s_proxy_failures < 255) {
+    ++s_proxy_failures;
+  }
+  if (!s_proxy_backed_off &&
+      s_proxy_failures >= config::kFeedProxyFailuresBeforeBackoff) {
+    s_proxy_backed_off = true;
+    s_proxy_backoff_until = millis() + config::kFeedProxyBackoffMs;
+    Serial.printf("adsb: proxy failed %u times, using adsb.fi directly\n",
+                  static_cast<unsigned>(s_proxy_failures));
+  }
+}
+
+void ensureHttpClient() {
+  if (s_http_initialized) {
+    return;
+  }
+  s_tls_client.setInsecure();
+  s_http.setReuse(true);
+  s_http_initialized = true;
+}
+
+void dropConnection() {
+  s_http.end();
+  s_tls_client.stop();
+}
+
+bool fetchDirect(double center_lat, double center_lon, float fetch_radius_km);
+bool fetchProxy(double center_lat, double center_lon, float fetch_radius_km);
+void serviceSocialQueue();
+
 }  // namespace
 
 void setPollFn(PollFn fn) { s_poll_fn = fn; }
@@ -209,7 +363,32 @@ size_t aircraftCount() { return s_aircraft_count; }
 
 const Aircraft* aircraftList() { return s_aircraft; }
 
+FeedSource lastFeedSource() { return s_last_source; }
+
+bool proxyBackedOff() { return s_proxy_backed_off; }
+
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
+  if (shouldUseProxy()) {
+    if (fetchProxy(center_lat, center_lon, fetch_radius_km)) {
+      s_proxy_failures = 0;
+      s_last_source = FeedSource::kProxy;
+      return true;
+    }
+    noteProxyFailure();
+    // Fall through to adsb.fi in this same cycle rather than showing an empty
+    // radar for a poll: the aircraft matter more than the tags.
+    dropConnection();
+  }
+  const bool ok = fetchDirect(center_lat, center_lon, fetch_radius_km);
+  if (ok) {
+    s_last_source = FeedSource::kDirect;
+  }
+  return ok;
+}
+
+namespace {
+
+bool fetchDirect(double center_lat, double center_lon, float fetch_radius_km) {
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
 
   // Fixed buffer URL instead of heap-allocating String fragments.
@@ -224,21 +403,15 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   // connection has dropped, fully release it FIRST, then the fresh handshake
   // runs from a recovered heap. On any failure we drop it too, so the next poll
   // reconnects cleanly rather than re-handshaking in place.
-  if (!s_http_initialized) {
-    s_tls_client.setInsecure();
-    s_http.setReuse(true);
-    s_http_initialized = true;
-  }
+  ensureHttpClient();
 
   if (!s_tls_client.connected()) {
-    s_http.end();
-    s_tls_client.stop();
+    dropConnection();
   }
 
   if (!s_http.begin(s_tls_client, url)) {
     Serial.println("adsb: http.begin failed");
-    s_http.end();
-    s_tls_client.stop();
+    dropConnection();
     return false;
   }
 
@@ -301,12 +474,18 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     s_aircraft[n].nose_deg = pickNoseHeading(plane);
     s_aircraft[n].track_deg = pickTrackHeading(plane);
     s_aircraft[n].gs_knots = pickGroundSpeed(plane);
+    s_aircraft[n].icao = 0;
     s_aircraft[n].is_military = false;
     if (plane["hex"].is<const char*>()) {
       const uint32_t hex_val =
           strtoul(plane["hex"].as<const char*>(), nullptr, 16);
+      s_aircraft[n].icao = hex_val;
       s_aircraft[n].is_military = data::military::isMilitary(hex_val);
     }
+    // The direct path is the fallback, so it carries no social tags. Clearing
+    // these stops a stale handle from the last proxy response being drawn.
+    s_aircraft[n].tag_handle[0] = '\0';
+    s_aircraft[n].tag_is_mine = false;
     fillTagFields(&s_aircraft[n], plane);
     ++n;
   }
@@ -315,6 +494,148 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
   return true;
 }
+
+bool fetchProxy(double center_lat, double center_lon, float fetch_radius_km) {
+  const float dist_nm = kmToNauticalMiles(fetch_radius_km);
+
+  char url[192];
+  snprintf(url, sizeof(url), "%s/v1/feed?lat=%.6f&lon=%.6f&dist=%.1f&gnd=%d",
+           config::kFeedProxyBaseUrl, center_lat, center_lon,
+           static_cast<double>(dist_nm),
+           config::kAdsbShowGroundAircraft ? 1 : 0);
+
+  ensureHttpClient();
+  if (!s_tls_client.connected()) {
+    dropConnection();
+  }
+  if (!s_http.begin(s_tls_client, url)) {
+    Serial.println("adsb: proxy http.begin failed");
+    return false;
+  }
+
+  s_http.setTimeout(kRequestTimeoutMs);
+  const int code = performGetWithPoll(s_http);
+  if (code != HTTP_CODE_OK) {
+    Serial.printf("adsb: proxy HTTP %d\n", code);
+    return false;
+  }
+
+  WiFiClient* stream = s_http.getStreamPtr();
+  if (stream == nullptr) {
+    Serial.println("adsb: proxy no stream");
+    return false;
+  }
+  const int content_length = s_http.getSize();
+  const unsigned long deadline = millis() + kRequestTimeoutMs;
+
+  StreamLineReader reader(stream, content_length, deadline);
+  char line[kFeedLineMax];
+  FeedHeader header = {};
+  FeedTag tags[kMaxFeedTags];
+  size_t tag_count = 0;
+  size_t n = 0;
+  bool saw_header = false;
+
+  while (reader.nextLine(line, sizeof(line))) {
+    Aircraft parsed = {};
+    FeedTag tag = {};
+    switch (feedParseLine(line, &header, &parsed, &tag)) {
+      case FeedLine::kHeader:
+        saw_header = true;
+        social::noteServerEpoch(header.server_epoch);
+        break;
+      case FeedLine::kAircraft:
+        // The header is the first line, so anything claiming to be an aircraft
+        // before it means this is not a PR1 body and must not reach the array.
+        if (!saw_header) {
+          break;
+        }
+        if (feedAircraftOnGround(parsed) && !config::kAdsbShowGroundAircraft) {
+          break;
+        }
+        if (n < kMaxAircraft) {
+          s_aircraft[n++] = parsed;
+        }
+        break;
+      case FeedLine::kTag:
+        if (tag_count < kMaxFeedTags) {
+          tags[tag_count++] = tag;
+        }
+        break;
+      case FeedLine::kInvalid:
+        // One bad line does not condemn the payload; the header check below is
+        // what decides whether this was a PR1 response at all.
+        break;
+    }
+  }
+
+  if (!saw_header) {
+    Serial.println("adsb: proxy response was not PR1");
+    // The array may hold half-written rows from a truncated body. Publishing zero
+    // is honest; the direct fallback runs in this same cycle and refills it.
+    s_aircraft_count = 0;
+    return false;
+  }
+
+  // Tags are joined onto aircraft here rather than server-side so the response
+  // stays identical for every device and therefore cacheable at the edge.
+  if (ui::radar::socialEnabled()) {
+    for (size_t t = 0; t < tag_count; ++t) {
+      feedApplyTag(s_aircraft, n, tags[t], social::handle());
+    }
+  }
+
+  drainRemainder(stream, content_length, reader.bytesConsumed(), deadline);
+  s_aircraft_count = n;
+  Serial.printf("adsb: %u aircraft, %u tags (proxy)\n",
+                static_cast<unsigned>(n), static_cast<unsigned>(tag_count));
+
+  // Same host, same keep-alive socket: piggybacking the claim here is what keeps
+  // the device down to a single TLS session.
+  serviceSocialQueue();
+  return true;
+}
+
+/**
+ * Send at most one queued claim/release per poll, on the connection the feed just
+ * used. One per poll is deliberate: a tag is a single button press, so there is
+ * never a backlog worth draining, and it bounds what a wedged queue can cost.
+ */
+void serviceSocialQueue() {
+  social::Request request;
+  if (!social::nextRequest(&request)) {
+    return;
+  }
+
+  char url[192];
+  snprintf(url, sizeof(url), "%s%s", config::kFeedProxyBaseUrl, request.path);
+  if (!s_http.begin(s_tls_client, url)) {
+    social::completeRequest(0, nullptr);
+    return;
+  }
+
+  s_http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  if (request.is_signed) {
+    s_http.addHeader("X-Radar-Device", request.device);
+    s_http.addHeader("X-Radar-Ts", request.timestamp);
+    s_http.addHeader("X-Radar-Sig", request.signature);
+  }
+
+  const int code = s_http.POST(reinterpret_cast<uint8_t*>(request.body),
+                               std::strlen(request.body));
+  if (code <= 0) {
+    Serial.printf("adsb: tag POST transport error %d\n", code);
+    social::completeRequest(code, nullptr);
+    dropConnection();
+    return;
+  }
+
+  // Replies are a couple of short key=value lines, so a String is cheap here.
+  const String body = s_http.getString();
+  social::completeRequest(code, body.c_str());
+}
+
+}  // namespace
 
 namespace {
 

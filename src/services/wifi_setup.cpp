@@ -16,6 +16,7 @@
 
 #include "config.h"
 #include "services/radar_location.h"
+#include "services/social_tags.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
 
@@ -84,6 +85,14 @@ char s_miles_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_miles("use_miles", "Display distances in miles", "T", 2,
                                    s_miles_checkbox_attrs, WFM_LABEL_AFTER);
 
+// Handle shown on other people's radars when this device tags an aircraft. Left
+// blank the Worker derives one from the device id, so the field is optional.
+constexpr int kHandleParamLen = 4;
+constexpr char kHandleInputAttrs[] =
+    " maxlength=\"4\" pattern=\"[A-Za-z0-9]{3,4}\" placeholder=\"3-4 letters/digits\"";
+WiFiManagerParameter s_param_handle("tag_handle", "Tag handle (shown to others)",
+                                    "", kHandleParamLen, kHandleInputAttrs);
+
 // Airport/runway visibility is owned by the on-device menu (4-state), so it is
 // intentionally not a portal parameter. A 2-state portal checkbox would collapse
 // the menu's "Medium"/"All" selection to "Large" on every WiFi/location save.
@@ -98,6 +107,7 @@ void refreshPortalParamDefaults() {
   snprintf(s_miles_checkbox_attrs, sizeof(s_miles_checkbox_attrs), "type=\"checkbox\"%s",
            ui::radar::useMiles() ? " checked" : "");
   s_param_miles.setValue("T", 2);
+  s_param_handle.setValue(services::social::wantedHandle(), kHandleParamLen);
 }
 
 void onPortalParamsSaved() {
@@ -106,6 +116,7 @@ void onPortalParamsSaved() {
     Serial.println("Invalid lat/lon in portal, keeping previous location");
   }
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
+  services::social::saveHandleFromPortal(s_param_handle.getValue());
 }
 
 void attachPortalParams(WiFiManager& wm) {
@@ -113,6 +124,7 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_lat);
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
+  wm.addParameter(&s_param_handle);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
 

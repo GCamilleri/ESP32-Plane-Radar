@@ -1,0 +1,28 @@
+name = "plane-radar-feed"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+
+# Free plan only supports the SQLite-backed Durable Object class, hence
+# new_sqlite_classes rather than new_classes.
+[[durable_objects.bindings]]
+name = "TAGS"
+class_name = "TagRegistry"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TagRegistry"]
+
+[vars]
+# Upstream ADS-B source. Devices never talk to it directly while the proxy is on.
+ADSB_BASE = "https://opendata.adsb.fi/api/v3"
+# How long a claim holds an aircraft against other devices, seconds.
+LOCK_SECONDS = "1800"
+# Edge cache TTL for the per-cell aircraft block. Also the floor on how often
+# any single cell can hit adsb.fi, whose public limit is 1 request/second.
+FEED_CACHE_SECONDS = "4"
+# Edge cache TTL for the global tag block.
+TAG_CACHE_SECONDS = "5"
+# Claims allowed per device per hour.
+CLAIMS_PER_HOUR = "10"
+# Global cap on simultaneously active tags, bounds the response size.
+MAX_ACTIVE_TAGS = "64"

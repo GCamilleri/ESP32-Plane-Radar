@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include <driver/gpio.h>
@@ -80,6 +81,32 @@ constexpr double kDefaultRadarLon = 4.9041;
 constexpr unsigned long kAdsbFetchIntervalMs = 3000;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
 constexpr bool kAdsbShowGroundAircraft = false;
+
+// --- Social aircraft tags (Cloudflare Worker proxy) ---
+/**
+ * Worker base URL, no trailing slash. Leave empty to build a device with no
+ * social features at all: the radar then always fetches adsb.fi directly and the
+ * Social menu entry reads "n/a".
+ *
+ * Deploy worker/ and put your own workers.dev subdomain (or custom domain) here.
+ */
+constexpr char kFeedProxyBaseUrl[] = "";
+/**
+ * Consecutive proxy failures before the device gives up on it and fetches
+ * adsb.fi directly instead. The radar must never depend on the Worker being up,
+ * so this is the standalone guarantee in code rather than in a comment.
+ */
+constexpr uint8_t kFeedProxyFailuresBeforeBackoff = 3;
+/** How long to stay on the direct feed before trying the proxy again. */
+constexpr unsigned long kFeedProxyBackoffMs = 300000UL;  // 5 min
+/** Exit the target picker after this long with no button activity. */
+constexpr unsigned long kTargetSelectTimeoutMs = 6000UL;
+/**
+ * Bytes of NVS-persisted device secret. Generated once from esp_random(). This is
+ * an identity for rate limiting, not a credential: registration is open, so
+ * anyone can mint one.
+ */
+constexpr size_t kSocialSecretBytes = 16;
 
 // --- UI colors (RGB565) for status screens ---
 constexpr uint16_t kColorBlack = 0x0000;

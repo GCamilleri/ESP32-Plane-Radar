@@ -83,6 +83,10 @@ void setMilitaryHighlight(bool enabled);
 bool webPortalEnabled();
 void setWebPortalEnabled(bool enabled);
 
+// --- Social aircraft tags (on by default; controls tagging, not the feed source) ---
+bool socialEnabled();
+void setSocialEnabled(bool enabled);
+
 // --- Runway/airport display mode ---
 // Modes are cumulative: each level adds its tier on top of the lower tiers.
 constexpr uint8_t kRunwayModeOff = 0;

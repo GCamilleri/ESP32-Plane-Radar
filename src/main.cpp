@@ -15,11 +15,13 @@
 #include "hardware/display.h"
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
+#include "services/social_tags.h"
 #include "services/wifi_setup.h"
 #include "ui/menu.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
+#include "ui/target_select.h"
 
 namespace {
 
@@ -61,7 +63,9 @@ void handleBootButton() {
   // It is disarmed while the menu is open: the menu selects on a 1 s hold, so a
   // slightly long press there must not wipe credentials. The menu carries its
   // own explicit "Reset WiFi" entry for that.
-  bootButtonSetLongPressEnabled(!ui::menu::isOpen());
+  // Disarmed for the target picker for the same reason as the menu: a hold there
+  // claims a tag, so a slightly long press must not wipe credentials.
+  bootButtonSetLongPressEnabled(!ui::menu::isOpen() && !ui::target::isOpen());
   bootButtonPollLongPress();
 
   if (ui::menu::isOpen()) {
@@ -74,8 +78,20 @@ void handleBootButton() {
     return;
   }
 
-  if (bootButtonConsumeTap()) {
+  if (ui::target::isOpen()) {
+    ui::target::update();
+    return;
+  }
+
+  // On the radar screen a single tap changes range and a double tap opens the
+  // target picker, so both have to go through the gesture API. That costs
+  // kBootGestureDebounceMs of latency on a range change: the price of telling one
+  // tap from two on a device with a single button.
+  const uint8_t taps = bootButtonConsumeGesture();
+  if (taps == 1) {
     onRangeTap();
+  } else if (taps >= 2 && !ui::target::open()) {
+    Serial.println("No aircraft on screen to tag");
   }
 
   if (bootButtonHeldMs() >= config::kBootShortHoldMs && !g_menu_hold_fired) {
@@ -121,6 +137,9 @@ void setup() {
   }
   services::location::init();
   ui::radar::rangeInit();
+  // Before the first fetch: the fetch task registers the device and signs claims,
+  // and needs the identity to exist by then.
+  services::social::init();
   services::adsb::setPollFn(wifiLoop);
   if (!services::adsb::fetchInit()) {
     Serial.println("Radar will render but stay empty (no fetch task)");

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace ui::radar {
@@ -91,6 +92,52 @@ constexpr uint8_t kRunwayLabelR = 140;
 constexpr uint8_t kRunwayLabelG = 120;
 constexpr uint8_t kRunwayLabelB = 200;
 
+/**
+ * Social tags. A tagged aircraft keeps its normal symbol colour and gains a corner
+ * bracket reticle plus the tagger's handle, so the tag reads as an annotation
+ * rather than as a different kind of contact.
+ *
+ * The reticle colour comes from the handle, which is why it is a fixed palette
+ * rather than a hash straight to RGB: every entry is legible on the dark
+ * background, none of them collide with the red aircraft symbols or the cyan
+ * military highlight, and the same tagger renders identically on every radar.
+ */
+constexpr uint8_t kTagPalette[][3] = {
+    {255, 220, 0},    // yellow
+    {0, 255, 130},    // spring green
+    {255, 120, 0},    // orange
+    {255, 0, 190},    // magenta
+    {160, 110, 255},  // violet
+    {255, 110, 150},  // pink
+    {200, 255, 60},   // lime
+    {0, 220, 190},    // teal
+};
+constexpr size_t kTagPaletteCount = sizeof(kTagPalette) / sizeof(kTagPalette[0]);
+
+/**
+ * Palette slot for a handle. FNV-1a, so it is stable across builds and identical
+ * on every device: two radars must draw the same tagger in the same colour, or the
+ * colour stops carrying any meaning.
+ */
+inline size_t tagPaletteIndex(const char* handle) {
+  uint32_t hash = 0x811c9dc5u;
+  for (const char* p = handle; p != nullptr && *p != '\0'; ++p) {
+    hash ^= static_cast<uint8_t>(*p);
+    hash *= 0x01000193u;
+  }
+  return hash % kTagPaletteCount;
+}
+
+/** The picker's cursor: white, so it never looks like anyone's tag colour. */
+constexpr uint8_t kSelectR = 255, kSelectG = 255, kSelectB = 255;
+
+/** Corner bracket reticle: distance from the symbol centre to the bracket. */
+constexpr int kTargetBracketRadiusPx = kAircraftNoseLenPx + 3;
+/** Length of each arm of a bracket. */
+constexpr int kTargetBracketArmPx = 4;
+/** The picker's cursor sits just outside a tag reticle so both can be seen at once. */
+constexpr int kSelectBracketRadiusPx = kTargetBracketRadiusPx + 4;
+
 /** Data freshness indicator dot. */
 constexpr uint8_t kFreshR = 0, kFreshG = 200, kFreshB = 0;
 constexpr uint8_t kAgingR = 255, kAgingG = 180, kAgingB = 0;
@@ -109,6 +156,8 @@ extern uint16_t gColorTagType;
 extern uint16_t gColorTagAltitude;
 extern uint16_t gColorRunway;
 extern uint16_t gColorRunwayLabel;
+extern uint16_t gColorTagPalette[kTagPaletteCount];
+extern uint16_t gColorSelect;
 
 /** Sweep line constants. */
 constexpr float kSweepDegreesPerSec = 60.0f;
