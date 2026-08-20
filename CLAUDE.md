@@ -24,7 +24,18 @@ pio run -t merge -e supermini   # output: .pio/build/supermini/firmware-merged.b
 ./scripts/merge-firmware.sh     # output: release/plane-radar-merged.bin
 ```
 
-There are no unit tests. Verification is done by flashing and observing behavior on the device.
+Host unit tests cover the pure-logic modules (`pio test -e native`, no hardware).
+Everything display- or radio-coupled is verified by flashing and observing behaviour
+on the device.
+
+The feed server in `server/` has its own toolchain: `npm install` (types only, no
+runtime dependencies), `npx tsc --noEmit` to typecheck, and `node src/index.ts` to
+run it against the real adsb.fi. Needs Node 24+.
+
+Note that Node runs those `.ts` files by stripping types rather than compiling.
+Parameter properties and enums are valid TypeScript that this mode cannot express,
+and they fail at *startup* rather than typecheck, which is why CI boots the server
+as well as typechecking it.
 
 ## Releasing
 
@@ -45,7 +56,10 @@ The firmware has four layers. Dependencies flow downward only.
 
 2. **`services/`** -- External I/O and persistent state.
    - `wifi_setup` -- WiFiManager integration, captive portal, mDNS, BOOT button ISR and long-press/tap handling. Owns the WiFiManager instance and portal custom parameters (lat, lon, miles, runways). Also manages the "force portal" NVS flag for credential resets.
-   - `adsb_client` -- HTTPS client for `opendata.adsb.fi/api/v3/`. Parses JSON into a fixed-size `Aircraft[64]` array. Uses a poll callback (`PollFn`) to keep WiFiManager responsive during HTTP I/O.
+   - `adsb_client` -- HTTPS client for the feed. Prefers the `server/` feed when `config::kFeedProxyBaseUrl` is set, falling back to `opendata.adsb.fi/api/v3/` after repeated failures. Fills a fixed-size `Aircraft[64]` array. Uses a poll callback (`PollFn`) to keep WiFiManager responsive during HTTP I/O.
+   - `adsb_feed` -- Pure parser for the server's line-oriented PR1 format, and the ICAO join that attaches social tags to aircraft. Host-testable, no I/O.
+   - `adsb_parse` -- Pure JSON field parsing for the direct adsb.fi fallback path. Host-testable.
+   - `social_tags` -- Device identity (NVS `social` namespace), handle, HMAC signing, and the single-slot claim/release queue. Owns no socket: `adsb_client` drains the queue on the connection the feed just used.
    - `radar_location` -- Reads/writes radar center lat/lon to NVS (`radar` namespace).
 
 3. **`ui/`** -- Display rendering, no I/O.
@@ -53,6 +67,7 @@ The firmware has four layers. Dependencies flow downward only.
    - `radar_range` -- Range preset state (5/10/15/25 km), miles/km toggle, runway toggle. Persists to NVS (`planeradar` namespace).
    - `radar_theme` -- All layout constants (radii, font sizes, margins) and RGB palette targets as `constexpr`. Colors are converted to RGB565 at runtime in `initPalette()` with an R/B swap for BGR panels.
    - `runway_overlay` -- Renders major-airport runways from embedded data. Clips lines and labels to the outer ring.
+   - `target_select` -- Target picker for social tagging. Entered by double tap; tap cycles outward, 1s hold claims or releases. Tracks the selection by ICAO, not index.
    - `status_screens` -- WiFi setup/connecting/error screens.
 
 4. **`hardware/`** -- Display driver and font loading.
@@ -68,7 +83,9 @@ The firmware has four layers. Dependencies flow downward only.
 
 - **Single-threaded**: everything runs in the Arduino `loop()` on core 0. The BOOT button uses an ISR (`IRAM_ATTR`) that sets flags consumed by polling in `loop()`.
 - **Poll callback**: `adsb_client` accepts a `PollFn` (set to `wifiLoop`) so the WiFiManager web portal stays responsive during HTTP requests.
-- **NVS namespaces**: `"wifi"` for force-portal flag, `"radar"` for lat/lon, `"planeradar"` for range index / miles / runways.
+- **NVS namespaces**: `"wifi"` for force-portal flag, `"radar"` for lat/lon, `"planeradar"` for range index / miles / runways / tags toggle, `"social"` for the device secret and tag handle.
+- **Social tags**: the feed server in `server/` (self-hosted Docker container) serves aircraft and tags in one response, so the device holds one connection to one host and the tag POST rides the feed's keep-alive socket. `adsb_client` picks TLS or plain HTTP by URL scheme, so a LAN address needs no other change. The device always falls back to fetching adsb.fi directly after repeated failures, which is what keeps a radar working when the server is down. See `docs/social-tags-design.md`.
+- **Feed URL is a build flag**: `RADAR_FEED_PROXY_URL`, empty by default, set via `RADAR_FEED_URL` in the `local` env. No machine-specific address belongs in the repo.
 - **GC9A01 BGR quirk**: the panel uses BGR subpixel order. `initPalette()` swaps R and B channels in `color565()` calls when `kDisplayRgbOrder` is true, so logical red appears red on screen.
 - **Partition layout**: custom 4 MB partition table (`partitions/plane_radar.csv`) with a single 3 MB app slot (no OTA), 896 KB SPIFFS, and a coredump partition.
 - **WiFi TX power**: set to 11 dBm in both AP and STA modes. The ESP32-C3 Super Mini has thermal issues at higher power due to poor antenna matching on cheap boards; 11 dBm is safe in sealed PETG enclosures (PETG Tg ~80°C, chip max 85°C). Do not exceed ~15 dBm without venting.

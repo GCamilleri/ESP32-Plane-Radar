@@ -1,0 +1,28 @@
+services:
+  plane-radar-feed:
+    # Built and published by .github/workflows/server-image.yml.
+    # Swap to `build: .` if you would rather build on the box than pull.
+    image: ghcr.io/gcamilleri/plane-radar-feed:latest
+    container_name: plane-radar-feed
+    restart: unless-stopped
+    ports:
+      # Your reverse proxy points at this. Bind to the LAN address rather than
+      # 0.0.0.0 if you want to be sure nothing but the proxy can reach it.
+      - "8787:8787"
+    volumes:
+      # Device registrations live here. Lose this and every radar re-registers,
+      # which changes their handles and so the colour every other radar draws
+      # for them.
+      - ./data:/data
+    environment:
+      LOCK_SECONDS: "1800"
+      CLAIMS_PER_HOUR: "10"
+      MAX_ACTIVE_TAGS: "64"
+      # Floor on how often one map cell can hit adsb.fi, whose public limit is
+      # 1 request/second per IP. Raise it if you add radars in scattered places.
+      FEED_CACHE_SECONDS: "4"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include <driver/gpio.h>
@@ -80,6 +81,57 @@ constexpr double kDefaultRadarLon = 4.9041;
 constexpr unsigned long kAdsbFetchIntervalMs = 3000;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
 constexpr bool kAdsbShowGroundAircraft = false;
+
+// --- Social aircraft tags (Cloudflare Worker proxy) ---
+/**
+ * Worker base URL, no trailing slash. Empty builds a device with no social
+ * features: the radar then always fetches adsb.fi directly.
+ *
+ * Deploy worker/ and put your own workers.dev subdomain here, or override at build
+ * time for a locally hosted Worker, which is what `pio run -e local` does:
+ *
+ *   RADAR_FEED_URL=http://192.168.1.17:8787 pio run -e local -t upload
+ *
+ * Both http:// and https:// work; adsb_client picks the transport by scheme, so a
+ * plain-HTTP LAN address needs no other change.
+ */
+#ifndef RADAR_FEED_PROXY_URL
+#define RADAR_FEED_PROXY_URL ""
+#endif
+constexpr char kFeedProxyBaseUrl[] = RADAR_FEED_PROXY_URL;
+/**
+ * Consecutive proxy failures before the device gives up on it and fetches
+ * adsb.fi directly instead. The radar must never depend on the Worker being up,
+ * so this is the standalone guarantee in code rather than in a comment.
+ */
+constexpr uint8_t kFeedProxyFailuresBeforeBackoff = 3;
+/**
+ * Backoff before retrying the proxy, doubling each time it fails again and reset to
+ * the base by any successful proxy fetch.
+ *
+ * Exponential rather than a flat delay because the two cases pull in opposite
+ * directions. A server that was restarted for twenty seconds should be picked up
+ * again almost immediately, which argues for a short delay; a server that is gone
+ * for the weekend should not be probed every few minutes forever, which argues for a
+ * long one. Doubling gets both: back within 30s of a blip, and settling at three
+ * wasted attempts per quarter hour when it is really down.
+ */
+constexpr unsigned long kFeedProxyBackoffBaseMs = 30000UL;   // 30 s
+constexpr unsigned long kFeedProxyBackoffMaxMs = 900000UL;   // 15 min
+/** Exit the target picker after this long with no button activity. */
+constexpr unsigned long kTargetSelectTimeoutMs = 6000UL;
+/**
+ * Give up on a queued claim after this long and report it. Without this a claim
+ * made while the proxy is unreachable sits in the queue and the UI shows
+ * "tagging..." forever, which reads as a hang rather than a failure.
+ */
+constexpr unsigned long kSocialRequestTimeoutMs = 20000UL;
+/**
+ * Bytes of NVS-persisted device secret. Generated once from esp_random(). This is
+ * an identity for rate limiting, not a credential: registration is open, so
+ * anyone can mint one.
+ */
+constexpr size_t kSocialSecretBytes = 16;
 
 // --- UI colors (RGB565) for status screens ---
 constexpr uint16_t kColorBlack = 0x0000;

@@ -9,6 +9,7 @@
 #include "config.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
+#include "services/social_tags.h"
 #include "services/wifi_setup.h"
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
@@ -33,6 +34,7 @@ const char* const kPollRateLabels[] = {"3s", "5s", "10s"};
 const char* const kSweepLabels[] = {"Off", "On"};
 const char* const kMilitaryLabels[] = {"Off", "On"};
 const char* const kWebPortalLabels[] = {"Off", "On"};
+const char* const kSocialLabels[] = {"Off", "On"};
 
 uint8_t getRange() { return radar::rangeIndex(); }
 void setRange(uint8_t v) { radar::setRangeIndex(v); }
@@ -55,10 +57,15 @@ void setMilitary(uint8_t v) { radar::setMilitaryHighlight(v == 1); }
 uint8_t getWebPortal() { return radar::webPortalEnabled() ? 1 : 0; }
 void setWebPortal(uint8_t v) { radar::setWebPortalEnabled(v == 1); }
 
+uint8_t getSocial() { return radar::socialEnabled() ? 1 : 0; }
+void setSocial(uint8_t v) { radar::setSocialEnabled(v == 1); }
+
 constexpr size_t kHeadingIndex = 1;
-constexpr size_t kSettingCount = 8;
-constexpr size_t kResetWifiIndex = kSettingCount;
-constexpr size_t kMenuItemCount = kSettingCount + 1;
+constexpr size_t kSettingCount = 9;
+// Action entries, not settings: they fire on hold rather than cycling a value.
+constexpr size_t kClearTagsIndex = kSettingCount;
+constexpr size_t kResetWifiIndex = kSettingCount + 1;
+constexpr size_t kMenuItemCount = kSettingCount + 2;
 
 const MenuItem kMenuItems[kSettingCount] = {
     {"Range", radar::kRangePresetCount, kRangeLabels, getRange, setRange},
@@ -72,6 +79,7 @@ const MenuItem kMenuItems[kSettingCount] = {
     {"Military", 2, kMilitaryLabels, getMilitary, setMilitary},
     {"Sweep", 2, kSweepLabels, getSweep, setSweep},
     {"WiFi Cfg", 2, kWebPortalLabels, getWebPortal, setWebPortal},
+    {"Tags", 2, kSocialLabels, getSocial, setSocial},
 };
 
 const char* compassDir(uint16_t deg) {
@@ -170,6 +178,7 @@ void drawMenuScreen() {
     const int y = kItemStartY + slot * kItemSpacing;
     const bool selected = (i == s_cursor);
     const bool is_reset = (i == kResetWifiIndex);
+    const bool is_clear_tags = (i == kClearTagsIndex);
     const uint16_t color = is_reset
         ? (selected ? tft.color565(255, 80, 80) : s_color_dim)
         : (selected ? s_color_selected : s_color_dim);
@@ -190,6 +199,11 @@ void drawMenuScreen() {
 
     if (is_reset) {
       tft.drawString("Reset WiFi", cx + kDotOffsetX + 10, y);
+      continue;
+    }
+
+    if (is_clear_tags) {
+      tft.drawString("Clear Tags", cx + kDotOffsetX + 10, y);
       continue;
     }
 
@@ -383,6 +397,15 @@ void update() {
       if (s_cursor == kResetWifiIndex) {
         close();
         wifiResetCredentialsAndReboot();
+        return;
+      }
+      if (s_cursor == kClearTagsIndex) {
+        // Queued rather than sent here: the network lives on the fetch task, and
+        // the menu must not block. The tags disappear from the radar as soon as
+        // the server confirms, which is its own feedback.
+        services::social::requestReleaseAll();
+        Serial.println("menu: clearing this device's tags");
+        close();
         return;
       }
       s_state = State::kSetting;

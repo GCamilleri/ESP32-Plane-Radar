@@ -1,8 +1,12 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 namespace services::adsb {
+
+/** Length of a social tag handle, plus the terminator. */
+constexpr size_t kTagHandleLen = 5;
 
 struct Aircraft {
   float lat;
@@ -13,6 +17,12 @@ struct Aircraft {
   char callsign[9];
   char type[5];
   char alt[12];
+  /** ICAO 24-bit address. Needed to join social tags onto the feed. */
+  uint32_t icao;
+  /** Handle of the device holding a social tag on this aircraft, "" if untagged. */
+  char tag_handle[kTagHandleLen];
+  /** True when tag_handle matches this device's own handle. */
+  bool tag_is_mine;
   bool is_military;
 };
 
@@ -25,10 +35,25 @@ const Aircraft* aircraftList();
 using PollFn = void (*)();
 void setPollFn(PollFn fn);
 
-/** Fetch aircraft within fetch_radius_km of center_lat/lon from adsb.fi. */
+/**
+ * Which upstream the last completed fetch actually used. The device prefers the
+ * proxy when social features are on, but falls back to adsb.fi on its own so a
+ * dead or over-quota Worker never takes the radar down with it.
+ */
+enum class FeedSource : uint8_t { kDirect, kProxy };
+FeedSource lastFeedSource();
+/** True while the proxy is being skipped after repeated failures. */
+bool proxyBackedOff();
+/**
+ * Cancel any backoff so the next poll tries the proxy again. Called when the user
+ * asks to tag something: deliberate intent should not have to wait out a timer
+ * started by an unrelated failure.
+ */
+void retryProxyNow();
+
+/** Fetch aircraft within fetch_radius_km of center_lat/lon. */
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km);
 
-/** Create background fetch task. Call once in setup(). */
 /** Starts the background fetch task. False means no fetches will run. */
 bool fetchInit();
 /** Start an async fetch. No-op if one is already running. */

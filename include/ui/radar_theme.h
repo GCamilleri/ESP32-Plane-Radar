@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace ui::radar {
@@ -91,6 +92,75 @@ constexpr uint8_t kRunwayLabelR = 140;
 constexpr uint8_t kRunwayLabelG = 120;
 constexpr uint8_t kRunwayLabelB = 200;
 
+/**
+ * Social tags. A tagged aircraft keeps its normal symbol colour and gains a corner
+ * bracket reticle plus the tagger's handle, so the tag reads as an annotation
+ * rather than as a different kind of contact.
+ *
+ * The reticle colour comes from the handle, which is why it is a fixed palette
+ * rather than a hash straight to RGB, and the same tagger renders identically on
+ * every radar.
+ *
+ * Chosen by scripts/pick_tag_palette.py rather than by eye. The radar already
+ * spends most of the colour wheel on meaning (red aircraft, cyan military, amber
+ * type, light-blue altitude, magenta track vectors, violet runways, white labels),
+ * and an eyeballed palette put two tags right next to the altitude colour. The
+ * script maximises the worst-case CIELAB distance to every reserved colour, after
+ * quantising to RGB565 because that is what the panel shows. Current worst case is
+ * deltaE 40, where 2.3 is "just noticeable".
+ *
+ * Five entries, not more: handles collide sooner, but two taggers sharing a colour
+ * is far less confusing than a tag being mistaken for an altitude readout. Re-run
+ * the script if any of the reserved colours below ever change.
+ */
+constexpr uint8_t kTagPalette[][3] = {
+    {255, 44, 140},   // hot pink
+    {99, 255, 181},   // mint
+    {222, 117, 82},   // salmon
+    {214, 255, 41},   // chartreuse
+    {165, 97, 255},   // purple
+};
+constexpr size_t kTagPaletteCount = sizeof(kTagPalette) / sizeof(kTagPalette[0]);
+
+/**
+ * Palette slot for a handle. FNV-1a, so it is stable across builds and identical
+ * on every device: two radars must draw the same tagger in the same colour, or the
+ * colour stops carrying any meaning.
+ */
+inline size_t tagPaletteIndex(const char* handle) {
+  uint32_t hash = 0x811c9dc5u;
+  for (const char* p = handle; p != nullptr && *p != '\0'; ++p) {
+    hash ^= static_cast<uint8_t>(*p);
+    hash *= 0x01000193u;
+  }
+  return hash % kTagPaletteCount;
+}
+
+/**
+ * Drawn in front of a handle so a tag cannot be read as a callsign, type code or
+ * airport ident, which is what a bare 3-4 character code looks like on a radar.
+ *
+ * Not a hyphen: ZK-ABC is the aircraft registration format, so a hyphenated code
+ * would read as a tail number, which is worse than no separator at all. '@' appears
+ * nowhere in aviation identifiers and is present in the embedded VLW font.
+ *
+ * Display only. The handle on the wire stays [A-Z0-9] so the palette hash and the
+ * server's validation are unaffected.
+ */
+constexpr char kTagHandleSigil[] = "@";
+/** "@" + 4 handle chars + terminator. */
+constexpr size_t kTagHandleLabelMax = 8;
+
+/** The picker's cursor: white, so it never looks like anyone's tag colour. */
+constexpr uint8_t kSelectR = 255, kSelectG = 255, kSelectB = 255;
+
+/** Corner bracket reticle: distance from the symbol centre to the bracket. */
+constexpr int kTargetBracketRadiusPx = kAircraftNoseLenPx + 3;
+/** Length of each arm of a bracket. */
+constexpr int kTargetBracketArmPx = 4;
+/** The picker's cursor sits just outside a tag reticle so both can be seen at once. */
+constexpr int kSelectBracketRadiusPx = kTargetBracketRadiusPx + 4;
+
 /** Data freshness indicator dot. */
 constexpr uint8_t kFreshR = 0, kFreshG = 200, kFreshB = 0;
 constexpr uint8_t kAgingR = 255, kAgingG = 180, kAgingB = 0;
@@ -109,6 +179,8 @@ extern uint16_t gColorTagType;
 extern uint16_t gColorTagAltitude;
 extern uint16_t gColorRunway;
 extern uint16_t gColorRunwayLabel;
+extern uint16_t gColorTagPalette[kTagPaletteCount];
+extern uint16_t gColorSelect;
 
 /** Sweep line constants. */
 constexpr float kSweepDegreesPerSec = 60.0f;

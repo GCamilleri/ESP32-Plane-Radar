@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <climits>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 
 #include "config.h"
@@ -15,6 +16,7 @@
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
+#include "ui/target_select.h"
 
 namespace ui {
 namespace radar {
@@ -30,6 +32,8 @@ uint16_t gColorTagType = 0x5DFF;
 uint16_t gColorTagAltitude = 0xFFE0;
 uint16_t gColorRunway = 0x4D5F;
 uint16_t gColorRunwayLabel = 0x7DFF;
+uint16_t gColorTagPalette[kTagPaletteCount] = {0};
+uint16_t gColorSelect = 0xFFFF;
 
 }  // namespace radar
 
@@ -168,6 +172,51 @@ void initPalette() {
       tft.color565(radar::kRunwayR, radar::kRunwayG, radar::kRunwayB);
   radar::gColorRunwayLabel = tft.color565(radar::kRunwayLabelR, radar::kRunwayLabelG,
                                           radar::kRunwayLabelB);
+  // Saturated, so they need the same BGR treatment as the aircraft symbols.
+  for (size_t i = 0; i < radar::kTagPaletteCount; ++i) {
+    const uint8_t r = radar::kTagPalette[i][0];
+    const uint8_t g = radar::kTagPalette[i][1];
+    const uint8_t b = radar::kTagPalette[i][2];
+    radar::gColorTagPalette[i] = config::kDisplayRgbOrder
+                                     ? tft.color565(b, g, r)
+                                     : tft.color565(r, g, b);
+  }
+  radar::gColorSelect =
+      tft.color565(radar::kSelectR, radar::kSelectG, radar::kSelectB);
+}
+
+bool isTagged(const services::adsb::Aircraft& plane) {
+  return plane.tag_handle[0] != '\0';
+}
+
+/** Reticle and handle colour for a tag, derived from the handle itself. */
+uint16_t tagColor(const services::adsb::Aircraft& plane) {
+  return radar::gColorTagPalette[radar::tagPaletteIndex(plane.tag_handle)];
+}
+
+/**
+ * Handle as drawn, sigil included. Returns a shared buffer: rendering is
+ * single-threaded and the result is consumed immediately by measure or draw.
+ */
+const char* tagHandleLabel(const services::adsb::Aircraft& plane) {
+  static char buf[radar::kTagHandleLabelMax];
+  snprintf(buf, sizeof(buf), "%s%s", radar::kTagHandleSigil, plane.tag_handle);
+  return buf;
+}
+
+/**
+ * Corner bracket reticle. Brackets rather than a full ring: a ring would read as
+ * another aircraft symbol at this size, and brackets leave the aeroplane and its
+ * speed vector visible through the middle.
+ */
+void drawTargetBrackets(int cx, int cy, int radius, int arm, uint16_t color) {
+  const int corners[4][2] = {{-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
+  for (const auto& corner : corners) {
+    const int x = cx + corner[0] * radius;
+    const int y = cy + corner[1] * radius;
+    s_draw->drawFastHLine(corner[0] < 0 ? x : x - arm + 1, y, arm, color);
+    s_draw->drawFastVLine(x, corner[1] < 0 ? y : y - arm + 1, arm, color);
+  }
 }
 
 float innerRingMaxKm() {
@@ -292,26 +341,41 @@ void applyTagStyle() {
   }
 }
 
+/**
+ * Lines in an aircraft's label block. The handle gets its own line on top of
+ * whatever the label mode asks for, including "None": a tag the user cannot read
+ * is not a tag, so it survives the setting that hides everything else.
+ */
+int tagBlockLineCount(const services::adsb::Aircraft& plane) {
+  const uint8_t mode = radar::labelMode();
+  const int base = (mode == 0) ? 3 : (mode == 1) ? 1 : 0;
+  return base + (isTagged(plane) ? 1 : 0);
+}
+
 int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
   applyTagStyle();
+  const uint8_t mode = radar::labelMode();
   int max_w = 0;
-  if (plane.callsign[0] != '\0') {
-    const int w = s_draw->textWidth(plane.callsign);
+
+  const auto widen = [&max_w](const char* text) {
+    if (text[0] == '\0') {
+      return;
+    }
+    const int w = s_draw->textWidth(text);
     if (w > max_w) {
       max_w = w;
     }
+  };
+
+  if (isTagged(plane)) {
+    widen(tagHandleLabel(plane));
   }
-  if (plane.type[0] != '\0') {
-    const int w = s_draw->textWidth(plane.type);
-    if (w > max_w) {
-      max_w = w;
-    }
+  if (mode <= 1) {
+    widen(plane.callsign);
   }
-  if (plane.alt[0] != '\0') {
-    const int w = s_draw->textWidth(plane.alt);
-    if (w > max_w) {
-      max_w = w;
-    }
+  if (mode == 0) {
+    widen(plane.type);
+    widen(plane.alt);
   }
   return max_w;
 }
@@ -373,6 +437,8 @@ struct BeyondDotDrawItem {
   int y = 0;
   int dist_sq = 0;
   bool is_military = false;
+  bool tagged = false;
+  uint16_t tag_color = 0;
 };
 
 // Scratch arrays for per-frame draw sorting.  File-scope static keeps ~1.8 KB
@@ -397,15 +463,11 @@ int overlapArea(int16_t ax, int16_t ay, int16_t aw, int16_t ah,
 
 void resolveLabels(size_t draw_count) {
   s_label_count = 0;
-  const uint8_t lbl_mode = radar::labelMode();
-  if (lbl_mode >= 2) return;
 
   initTagLabelMetrics();
   applyTagStyle();
 
   const int line_h = s_draw->fontHeight();
-  const int line_count = (lbl_mode == 0) ? 3 : 1;
-  const int block_h = line_h * line_count;
   const int symbol_half = radar::kAircraftNoseLenPx + radar::kAircraftTailHalfPx;
   const int gap = radar::kAircraftLabelGapPx;
 
@@ -417,6 +479,11 @@ void resolveLabels(size_t draw_count) {
     const size_t i = s_draw_items[d].index;
     const int ax = s_draw_items[d].x;
     const int ay = s_draw_items[d].y;
+
+    // Block height is per-aircraft now: a tagged one carries an extra handle
+    // line, so it cannot be hoisted out of the loop.
+    const int block_h = line_h * tagBlockLineCount(planes[i]);
+    if (block_h <= 0) continue;
 
     const int block_w = measureTagBlockWidth(planes[i]);
     if (block_w <= 0) continue;
@@ -502,6 +569,16 @@ void drawAircraftTagPlaced(const LabelPlacement& place,
     s_draw->setTextDatum(textdatum_t::top_right);
   }
 
+  // Handle first and in the tagger's own colour, matching the reticle around the
+  // symbol so the two read as one annotation.
+  if (isTagged(plane)) {
+    s_draw->setTextColor(tagColor(plane), radar::gColorBackground);
+    s_draw->drawString(tagHandleLabel(plane), anchor_x, ly);
+    ly += line_h;
+  }
+
+  if (lbl_mode >= 2) return;
+
   if (plane.callsign[0] != '\0') {
     s_draw->setTextColor(radar::gColorLabel, radar::gColorBackground);
     s_draw->drawString(plane.callsign, anchor_x, ly);
@@ -556,6 +633,7 @@ void drawAircraft() {
 
   const size_t n = services::adsb::aircraftCount();
   const services::adsb::Aircraft* planes = services::adsb::aircraftList();
+  const uint32_t selected_icao = target::selectedIcao();
 
   size_t draw_count = 0;
   size_t dot_count = 0;
@@ -588,6 +666,12 @@ void drawAircraft() {
     s_draw_dots[dot_count].y = dot_y;
     s_draw_dots[dot_count].dist_sq = geo::distSqFromCenter(dot_x, dot_y);
     s_draw_dots[dot_count].is_military = planes[i].is_military;
+    // A tagged aircraft beyond the ring gets its tagger's colour on the rim dot.
+    // There is no room for a reticle out there, and the colour is the part that
+    // says "someone flagged this".
+    s_draw_dots[dot_count].tagged = isTagged(planes[i]);
+    s_draw_dots[dot_count].tag_color =
+        s_draw_dots[dot_count].tagged ? tagColor(planes[i]) : 0;
     ++dot_count;
   }
 
@@ -597,9 +681,12 @@ void drawAircraft() {
             });
   const bool mil_highlight = radar::militaryHighlight();
   for (size_t d = 0; d < dot_count; ++d) {
-    const uint16_t color = (s_draw_dots[d].is_military && mil_highlight)
-                               ? radar::gColorMilitary
-                               : radar::gColorAircraft;
+    uint16_t color = (s_draw_dots[d].is_military && mil_highlight)
+                         ? radar::gColorMilitary
+                         : radar::gColorAircraft;
+    if (s_draw_dots[d].tagged) {
+      color = s_draw_dots[d].tag_color;
+    }
     drawBeyondRingDot(s_draw_dots[d].x, s_draw_dots[d].y, color);
   }
 
@@ -621,9 +708,28 @@ void drawAircraft() {
                     planes[i].track_deg - h_deg,
                     planes[i].gs_knots, vector_color);
     drawHeadingTriangle(x, y, planes[i].nose_deg - h_deg, symbol_color);
+
+    // A tagged aircraft keeps its normal symbol and gains a reticle. Recolouring
+    // the symbol would hide whether it is military, which is the one thing the
+    // colour already means.
+    if (isTagged(planes[i])) {
+      drawTargetBrackets(x, y, radar::kTargetBracketRadiusPx,
+                         radar::kTargetBracketArmPx, tagColor(planes[i]));
+    }
+    if (selected_icao != 0 && planes[i].icao == selected_icao) {
+      drawTargetBrackets(x, y, radar::kSelectBracketRadiusPx,
+                         radar::kTargetBracketArmPx, radar::gColorSelect);
+    }
   }
+
+  // Labels are drawn whenever anything on screen is tagged, even in "None" mode:
+  // the handle is the whole point of the tag, so it outranks the label setting.
   const uint8_t lbl_mode = radar::labelMode();
-  if (lbl_mode < 2) {
+  bool any_tagged = false;
+  for (size_t d = 0; d < draw_count && !any_tagged; ++d) {
+    any_tagged = isTagged(planes[s_draw_items[d].index]);
+  }
+  if (lbl_mode < 2 || any_tagged) {
     resolveLabels(draw_count);
     for (size_t p = 0; p < s_label_count; ++p) {
       const size_t d = s_label_placements[p].src_draw_idx;
@@ -631,6 +737,34 @@ void drawAircraft() {
       drawAircraftTagPlaced(s_label_placements[p], planes[i]);
     }
   }
+}
+
+/**
+ * Footer for the target picker: what is selected and what happened to the last
+ * claim. Drawn over the grid rather than in a panel so the radar stays readable
+ * while picking, which matters when the aircraft you want is still moving.
+ */
+void drawTargetFooter() {
+  const char* status = target::statusText();
+  if (status[0] == '\0') {
+    return;
+  }
+
+  initTagLabelMetrics();
+  applyTagStyle();
+  s_draw->setTextDatum(textdatum_t::bottom_center);
+
+  const int text_w = s_draw->textWidth(status);
+  const int text_h = s_draw->fontHeight();
+  constexpr int kFooterBaselineY = radar::kSize - 8;
+  constexpr int kPadX = 4;
+  constexpr int kPadY = 2;
+
+  s_draw->fillRect(radar::kCenterX - text_w / 2 - kPadX,
+                   kFooterBaselineY - text_h - kPadY, text_w + kPadX * 2,
+                   text_h + kPadY * 2, radar::gColorBackground);
+  s_draw->setTextColor(radar::gColorSelect, radar::gColorBackground);
+  s_draw->drawString(status, radar::kCenterX, kFooterBaselineY);
 }
 
 void applyCardinalStyle() {
@@ -796,6 +930,7 @@ void renderFrame() {
     const DrawScope scope(s_frame);
     drawSweep();
     drawAircraft();
+    drawTargetFooter();
   }
   s_frame.pushSprite(0, 0);
   tft.setTextDatum(textdatum_t::top_left);

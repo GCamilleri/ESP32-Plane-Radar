@@ -5,3 +5,5 @@ release/
 .vscode/launch.json
 .vscode/ipch
 .claude/
+# wrangler drops a cache here when run with an explicit --config path
+.wrangler/
