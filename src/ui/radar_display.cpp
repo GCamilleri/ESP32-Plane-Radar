@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <climits>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 
 #include "config.h"
@@ -194,6 +195,16 @@ uint16_t tagColor(const services::adsb::Aircraft& plane) {
 }
 
 /**
+ * Handle as drawn, sigil included. Returns a shared buffer: rendering is
+ * single-threaded and the result is consumed immediately by measure or draw.
+ */
+const char* tagHandleLabel(const services::adsb::Aircraft& plane) {
+  static char buf[radar::kTagHandleLabelMax];
+  snprintf(buf, sizeof(buf), "%s%s", radar::kTagHandleSigil, plane.tag_handle);
+  return buf;
+}
+
+/**
  * Corner bracket reticle. Brackets rather than a full ring: a ring would read as
  * another aircraft symbol at this size, and brackets leave the aeroplane and its
  * speed vector visible through the middle.
@@ -357,7 +368,7 @@ int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
   };
 
   if (isTagged(plane)) {
-    widen(plane.tag_handle);
+    widen(tagHandleLabel(plane));
   }
   if (mode <= 1) {
     widen(plane.callsign);
@@ -562,7 +573,7 @@ void drawAircraftTagPlaced(const LabelPlacement& place,
   // symbol so the two read as one annotation.
   if (isTagged(plane)) {
     s_draw->setTextColor(tagColor(plane), radar::gColorBackground);
-    s_draw->drawString(plane.tag_handle, anchor_x, ly);
+    s_draw->drawString(tagHandleLabel(plane), anchor_x, ly);
     ly += line_h;
   }
 

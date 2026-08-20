@@ -10,6 +10,7 @@
 #include "services/social_tags.h"
 #include "services/wifi_setup.h"
 #include "ui/radar_geo.h"
+#include "ui/radar_theme.h"
 
 namespace ui::target {
 namespace {
@@ -76,8 +77,10 @@ void touch() { s_last_interaction_ms = millis(); }
 
 void setStatusFromPlane(const services::adsb::Aircraft& plane) {
   if (plane.tag_handle[0] != '\0') {
-    snprintf(s_status, sizeof(s_status), "%s  [%s]", plane.callsign,
-             plane.tag_handle);
+    // Same sigil as the label on the radar, so the footer and the tag read as
+    // the same thing rather than two different codes.
+    snprintf(s_status, sizeof(s_status), "%s  %s%s", plane.callsign,
+             radar::kTagHandleSigil, plane.tag_handle);
   } else {
     snprintf(s_status, sizeof(s_status), "%s", plane.callsign);
   }
@@ -113,8 +116,8 @@ void pollPendingResult() {
       s_status[sizeof(s_status) - 1] = '\0';
       break;
     case PendingState::kClaimed:
-      snprintf(s_status, sizeof(s_status), "tagged as %s",
-               services::social::handle());
+      snprintf(s_status, sizeof(s_status), "tagged as %s%s",
+               radar::kTagHandleSigil, services::social::handle());
       services::social::clearPending();
       break;
     case PendingState::kReleased:
@@ -122,9 +125,16 @@ void pollPendingResult() {
       s_status[sizeof(s_status) - 1] = '\0';
       services::social::clearPending();
       break;
+    case PendingState::kClearedAll:
+      // Fired from the menu, which closes itself, so this is usually only seen if
+      // the picker is opened again before the state is acknowledged.
+      std::strncpy(s_status, "tags cleared", sizeof(s_status) - 1);
+      s_status[sizeof(s_status) - 1] = '\0';
+      services::social::clearPending();
+      break;
     case PendingState::kDenied:
-      snprintf(s_status, sizeof(s_status), "held by %s",
-               services::social::pendingOwner());
+      snprintf(s_status, sizeof(s_status), "held by %s%s",
+               radar::kTagHandleSigil, services::social::pendingOwner());
       services::social::clearPending();
       break;
     case PendingState::kError: {
@@ -159,7 +169,8 @@ void onHold() {
   if (plane.tag_handle[0] != '\0' && !plane.tag_is_mine) {
     // The server would reject this anyway; saying so locally saves a round trip
     // and reads as a deliberate rule rather than a failure.
-    snprintf(s_status, sizeof(s_status), "held by %s", plane.tag_handle);
+    snprintf(s_status, sizeof(s_status), "held by %s%s",
+             radar::kTagHandleSigil, plane.tag_handle);
     return;
   }
 
