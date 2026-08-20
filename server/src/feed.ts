@@ -14,14 +14,53 @@ import { aircraftLine, type FeedAircraft } from './protocol.ts';
 // multiplies fetches without making many requests. When the limiter refuses, a
 // slightly stale cell is served instead, which beats failing the poll and beats
 // getting the address restricted.
+//
+// What is cached per cell is the parsed aircraft, not the rendered lines, and the
+// cell is fetched at one canonical radius rather than at whatever radius asked for
+// it. Three things follow, all of which were wrong when the radius was part of the
+// key and the lines were cached whole:
+//
+//   - Two radars in the same place on different range settings share one fetch. The
+//     smaller circle is a subset of the larger, so fetching both was pure waste.
+//   - A device gets its own circle, not the cell's. A radar can sit up to half a
+//     cell diagonal from the centre it shares, so the far edge of its range used to
+//     fall outside what was ever fetched and those aircraft simply never appeared.
+//   - The 64 slots go to the 64 nearest *the device*. Nearest the cell centre is a
+//     different set, and in dense airspace that costs a device its closest traffic.
 
 /** ~5.5 km cells: coarse enough to pool neighbours, fine enough for the 64 slots. */
 const CELL_DEGREES = 0.05;
 
+/**
+ * Furthest a device can sit from its cell's centre, in nm: half the cell diagonal,
+ * taken at the equator where a degree of longitude is widest.
+ */
+const CELL_PAD_NM = (Math.SQRT2 * (CELL_DEGREES / 2) * 111.32) / 1.852;
+
+/**
+ * Radius every cell is fetched at. Comfortably clears the largest range preset's
+ * ~19.8 nm plus CELL_PAD_NM, so in practice every radar shares one entry per cell
+ * whatever its range. A request for more than this gets its own entry rather than
+ * being quietly served short.
+ */
+const CANONICAL_DIST_NM = 25;
+
+/**
+ * Bound on aircraft held per cell. Only reached over somewhere like Heathrow, and
+ * well above the 64 any one response can carry.
+ */
+const MAX_CACHED_AIRCRAFT = 250;
+
 /** Matches the firmware's services::adsb::kMaxAircraft. */
 export const MAX_AIRCRAFT = 64;
 
-const cellCache = new TtlCache<string[]>();
+/** A parsed upstream aircraft, kept ready to render for any radius in the cell. */
+interface CellAircraft {
+  aircraft: FeedAircraft;
+  onGround: boolean;
+}
+
+const cellCache = new TtlCache<CellAircraft[]>();
 const upstreamLimiter = new MinIntervalLimiter(config.upstreamMinIntervalMs);
 
 export interface FeedRequest {
@@ -75,10 +114,20 @@ function quantise(value: number): number {
   return Math.round(value / CELL_DEGREES) * CELL_DEGREES;
 }
 
-/** Short cell identifier, also the cache key, so shared fetches show up in logs. */
+/** Radius this request's cell is fetched at. The canonical one unless asked for more. */
+export function fetchRadiusNm(req: FeedRequest): number {
+  return Math.max(CANONICAL_DIST_NM, Math.ceil(req.distNm + CELL_PAD_NM));
+}
+
+/**
+ * Short cell identifier, also the cache key, so shared fetches show up in the log.
+ *
+ * Neither the requested radius nor the ground flag appears here any more: both are
+ * applied when the response is built, so radars differing only in those share the
+ * one fetch.
+ */
 export function cellLabel(req: FeedRequest): string {
-  const gnd = req.includeGround ? 1 : 0;
-  return `${quantise(req.lat).toFixed(2)}/${quantise(req.lon).toFixed(2)}/${Math.ceil(req.distNm)}/${gnd}`;
+  return `${quantise(req.lat).toFixed(2)}/${quantise(req.lon).toFixed(2)}/${fetchRadiusNm(req)}`;
 }
 
 interface UpstreamAircraft {
@@ -124,6 +173,32 @@ function approxDistSq(lat: number, lon: number, centreLat: number, centreLon: nu
   return dLat * dLat + dLon * dLon;
 }
 
+const DEG_TO_NM = 111.32 / 1.852;
+
+function approxDistNm(lat: number, lon: number, fromLat: number, fromLon: number): number {
+  return Math.sqrt(approxDistSq(lat, lon, fromLat, fromLon)) * DEG_TO_NM;
+}
+
+/**
+ * The lines for one request, taken from its cell's aircraft.
+ *
+ * Measured from where the radar actually is rather than from the cell centre it
+ * shares, so it gets its own circle and its own nearest 64. Exported for the tests:
+ * this is the whole per-request half of the feed and it needs no network.
+ */
+export function selectLines(req: FeedRequest, cell: CellAircraft[]): string[] {
+  return cell
+    .filter((entry) => req.includeGround || !entry.onGround)
+    .map((entry) => ({
+      entry,
+      d: approxDistNm(entry.aircraft.lat, entry.aircraft.lon, req.lat, req.lon),
+    }))
+    .filter((scored) => scored.d <= req.distNm)
+    .sort((a, b) => a.d - b.d)
+    .slice(0, MAX_AIRCRAFT)
+    .map((scored) => aircraftLine(scored.entry.aircraft));
+}
+
 function toFeedAircraft(ac: UpstreamAircraft): FeedAircraft | null {
   if (typeof ac.lat !== 'number' || typeof ac.lon !== 'number') return null;
   const hex = (ac.hex ?? '').trim().toUpperCase();
@@ -143,17 +218,19 @@ function toFeedAircraft(ac: UpstreamAircraft): FeedAircraft | null {
 }
 
 /**
- * A block for the requested cell, from cache when possible.
+ * A block for the requesting radar, from its cell's cache when possible.
  *
  * Two jobs stay off the device here: the response carries only the ten fields the
  * radar draws, roughly a fifth of adsb.fi's payload, and the 64 aircraft kept are
- * the 64 *nearest* rather than whatever order the upstream returned. The firmware's
- * direct-fetch fallback cannot do either cheaply.
+ * the 64 *nearest that radar* rather than whatever order the upstream returned. The
+ * firmware's direct-fetch fallback cannot do either cheaply.
  */
 export async function aircraftBlock(req: FeedRequest): Promise<AircraftBlock> {
   const key = cellLabel(req);
   const cached = cellCache.get(key);
-  if (cached !== undefined) return { lines: cached.value, cache: 'hit', ageMs: cached.ageMs };
+  if (cached !== undefined) {
+    return { lines: selectLines(req, cached.value), cache: 'hit', ageMs: cached.ageMs };
+  }
 
   // Cache miss, so this would cost an upstream fetch. If that would breach the
   // interval, fall back to whatever we last had for this cell.
@@ -161,7 +238,7 @@ export async function aircraftBlock(req: FeedRequest): Promise<AircraftBlock> {
     const stale = cellCache.getStale(key, config.maxStaleSeconds);
     if (stale !== undefined) {
       return {
-        lines: stale.value,
+        lines: selectLines(req, stale.value),
         cache: 'stale',
         ageMs: stale.ageMs,
         ageSeconds: Math.round(stale.staleMs / 1000),
@@ -172,8 +249,7 @@ export async function aircraftBlock(req: FeedRequest): Promise<AircraftBlock> {
 
   const lat = quantise(req.lat).toFixed(4);
   const lon = quantise(req.lon).toFixed(4);
-  const dist = Math.ceil(req.distNm);
-  const url = `${config.adsbBase}/lat/${lat}/lon/${lon}/dist/${dist}`;
+  const url = `${config.adsbBase}/lat/${lat}/lon/${lon}/dist/${fetchRadiusNm(req)}`;
 
   let payload: { ac?: UpstreamAircraft[] };
   try {
@@ -191,21 +267,26 @@ export async function aircraftBlock(req: FeedRequest): Promise<AircraftBlock> {
     throw new FeedUpstreamError(`adsb.fi unreachable: ${reason}`, 0);
   }
 
+  // Ground aircraft are kept here and filtered per request: gnd is no longer part of
+  // the key, so this one entry has to be able to answer either way.
   const centreLat = Number(lat);
   const centreLon = Number(lon);
-  const lines = (payload.ac ?? [])
-    .filter((ac) => req.includeGround || ac.alt_baro !== 'ground')
+  const cell: CellAircraft[] = (payload.ac ?? [])
     .map((ac) => ({ ac, d: approxDistSq(ac.lat ?? 0, ac.lon ?? 0, centreLat, centreLon) }))
     .sort((a, b) => a.d - b.d)
-    .map((entry) => toFeedAircraft(entry.ac))
-    .filter((ac): ac is FeedAircraft => ac !== null)
-    .slice(0, MAX_AIRCRAFT)
-    .map(aircraftLine);
+    .slice(0, MAX_CACHED_AIRCRAFT)
+    .map((entry) => {
+      const aircraft = toFeedAircraft(entry.ac);
+      return aircraft === null
+        ? null
+        : { aircraft, onGround: entry.ac.alt_baro === 'ground' };
+    })
+    .filter((entry): entry is CellAircraft => entry !== null);
 
-  cellCache.set(key, lines, config.feedCacheSeconds);
+  cellCache.set(key, cell, config.feedCacheSeconds);
   // Age 0: whatever adsb.fi's own latency is, we cannot see it from here, and the
   // one part we can account for is how long we then held the block ourselves.
-  return { lines, cache: 'miss', ageMs: 0 };
+  return { lines: selectLines(req, cell), cache: 'miss', ageMs: 0 };
 }
 
 export function sweepFeedCache(): void {

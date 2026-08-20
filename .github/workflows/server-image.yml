@@ -30,6 +30,10 @@ jobs:
         working-directory: server
       - run: npx tsc --noEmit
         working-directory: server
+      # Cell selection and the per-request geometry: pure functions, and the rules
+      # that decide whether a radar is shown the aircraft around it.
+      - run: npm test
+        working-directory: server
 
   smoke:
     # Catches the class of failure that typecheck cannot: Node runs these .ts files

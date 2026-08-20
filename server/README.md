@@ -251,6 +251,14 @@ one cache entry and therefore one upstream fetch: cost scales with populated cel
 rather than with how many radars you own. Measured with two radars polling every 3s,
 68 requests produced 21 fetches.
 
+Neither the requested radius nor the ground flag is part of that key. What is cached
+is the cell's parsed aircraft, fetched at one canonical 25 nm radius, and each
+response is built from it for the radar that asked: filtered to that radar's own
+radius, measured from where it actually is, and capped at the nearest 64. Two radars
+side by side on different range settings therefore cost one fetch, not two, and a
+radar sitting near the edge of its cell still gets the whole of its own range rather
+than the cell centre's.
+
 Cell sharing alone is not a guarantee, though, because one client asking about many
 scattered cells multiplies fetches without making many requests. So
 `UPSTREAM_MIN_INTERVAL_MS` is a hard floor between fetches across all clients. When

@@ -22,6 +22,7 @@ function emit(kind: string, pairs: Record<string, unknown>): void {
 
 /** A served feed request. `upstream` says whether it cost an adsb.fi fetch. */
 export function logFeed(opts: {
+  client?: string;
   lat: number;
   lon: number;
   distNm: number;
@@ -33,6 +34,7 @@ export function logFeed(opts: {
   ms: number;
 }): void {
   emit('feed', {
+    client: opts.client,
     cell: opts.cell,
     lat: opts.lat.toFixed(4),
     lon: opts.lon.toFixed(4),

@@ -57,7 +57,11 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-async function handleFeed(params: URLSearchParams, res: ServerResponse): Promise<void> {
+async function handleFeed(
+  httpReq: IncomingMessage,
+  params: URLSearchParams,
+  res: ServerResponse,
+): Promise<void> {
   const req = parseFeedRequest(params);
   if (req === null) {
     logRejected({ route: '/v1/feed', status: 400, reason: 'bad-params' });
@@ -70,6 +74,9 @@ async function handleFeed(params: URLSearchParams, res: ServerResponse): Promise
   const tags = store.tagBlock();
 
   logFeed({
+    // Which radar asked. With several of them the cell alone cannot tell you whose
+    // poll went stale, and two in the same cell are otherwise indistinguishable.
+    client: clientAddress(httpReq),
     lat: req.lat,
     lon: req.lon,
     distNm: req.distNm,
@@ -276,7 +283,7 @@ const server = createServer((req, res) => {
         return;
       }
       if (route === 'GET /v1/feed') {
-        await handleFeed(url.searchParams, res);
+        await handleFeed(req, url.searchParams, res);
         return;
       }
       if (route === 'GET /v1/tags') {
@@ -326,6 +333,15 @@ const server = createServer((req, res) => {
     }
   })();
 });
+
+// Node closes an idle keep-alive socket after 5s by default, which is shorter than a
+// radar's own gaps: the poll pauses while its menu is open, so the device comes back
+// to a socket the server has already closed, its GET fails at the transport, and its
+// retry costs a second upstream fetch for a response it already paid for. Held well
+// past any plausible gap instead. headersTimeout must stay above keepAliveTimeout, or
+// it fires on connections that are merely idle between requests.
+server.keepAliveTimeout = 65_000;
+server.headersTimeout = 70_000;
 
 function usage(): string {
   return [
