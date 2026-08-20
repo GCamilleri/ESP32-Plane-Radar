@@ -15,6 +15,15 @@ services:
       # for them.
       - ./data:/data
     environment:
+      # Ownership of the mounted volume, fixed up at container start. A bind mount
+      # arrives owned by the host, so this cannot be settled in the image. 99:100 is
+      # Unraid's nobody:users; on other hosts use the owner of ./data.
+      PUID: "99"
+      PGID: "100"
+      # Shared key every radar must send as X-Radar-Key. Leave empty for an open
+      # server; set it to the same value the firmware was built with and check it at
+      # the reverse proxy too.
+      FEED_KEY: "${FEED_KEY:-}"
       LOCK_SECONDS: "1800"
       CLAIMS_PER_HOUR: "10"
       MAX_ACTIVE_TAGS: "64"

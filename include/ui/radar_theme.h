@@ -140,15 +140,17 @@ inline size_t tagPaletteIndex(const char* handle) {
  * Drawn in front of a handle so a tag cannot be read as a callsign, type code or
  * airport ident, which is what a bare 3-4 character code looks like on a radar.
  *
- * Not a hyphen: ZK-ABC is the aircraft registration format, so a hyphenated code
- * would read as a tail number, which is worse than no separator at all. '@' appears
- * nowhere in aviation identifiers and is present in the embedded VLW font.
+ * "R-" for radar. A bare hyphenated code would read as a tail number, since ZK-ABC
+ * is the registration format, but a consistent two-character prefix reads as a
+ * namespace instead: every tag on screen starts the same way, and nothing in
+ * aviation is prefixed R-. Costs one glyph of label width over a single sigil,
+ * which is the trade for being self-explanatory.
  *
  * Display only. The handle on the wire stays [A-Z0-9] so the palette hash and the
  * server's validation are unaffected.
  */
-constexpr char kTagHandleSigil[] = "@";
-/** "@" + 4 handle chars + terminator. */
+constexpr char kTagHandleSigil[] = "R-";
+/** "R-" + 4 handle chars + terminator. */
 constexpr size_t kTagHandleLabelMax = 8;
 
 /** The picker's cursor: white, so it never looks like anyone's tag colour. */

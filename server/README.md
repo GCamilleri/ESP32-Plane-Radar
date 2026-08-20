@@ -82,6 +82,14 @@ The `/data` mapping matters more than it looks. Device registrations live there,
 a handle determines its own colour, so losing that volume changes what colour every
 radar draws for every tagger.
 
+**Ownership of that directory is the one thing that will stop the container
+starting.** A bind mount replaces the image's `/data` including its ownership, so
+whatever the host says wins, and SQLite reports the result as a bare "unable to open
+database file". The entrypoint fixes it at startup by chowning to `PUID:PGID`, which
+default to Unraid's `99:100`. On another host, set them to the owner of the directory
+you mounted. If it still cannot write, the container now says so in plain language
+instead of leaving the SQLite error as the only clue.
+
 Check it is working from the box itself before putting a proxy in front:
 
 ```bash
@@ -143,36 +151,56 @@ RADAR_FEED_URL=https://radar.example.com pio run -e local -t upload
 
 `https` is all the firmware needs to switch to TLS; there is no other change.
 
-### Worth knowing before you expose it
+### Locking it down
 
-`/v1/feed` is unsigned, and `/v1/register` is open to anyone. On a LAN that was
-fine. On the public internet:
+`/v1/feed` is unsigned and `/v1/register` accepts anyone, which was fine on a LAN.
+On the public internet, a stranger who learns the hostname can spend your adsb.fi
+budget from your IP, and can register a device and fill `MAX_ACTIVE_TAGS` to crowd
+your tags out. They cannot touch your tags: release is owner-only.
 
-- Anyone who learns the hostname can pull the feed, which spends **your** adsb.fi
-  request budget from **your** IP.
-- Anyone can register a device and then claim aircraft. They cannot touch your
-  tags (release is owner-only) but they can fill `MAX_ACTIVE_TAGS` and crowd
-  yours out.
+So every request carries a shared key. Generate one, then set it in three places:
 
-Neither is catastrophic and neither is hard to bound. The cheapest effective fix is
-a shared header checked at the proxy, so unauthenticated traffic never reaches the
-container:
-
-```nginx
-    # In the server block, before location /
-    if ($http_x_radar_key != "some-long-random-string") { return 404; }
+```bash
+openssl rand -hex 24
 ```
 
-That needs the firmware to send the header, which it does not do yet. Cloudflare
-Access with a Service Auth policy is the tidier version of the same idea (two
-static headers, no proxy config), and it is worth doing if this ever hosts more
-than your own radars.
+1. **The server**, as `FEED_KEY`. Requests without it get a flat 404, which tells a
+   scanner nothing. `/healthz` stays open so the container healthcheck still works.
+2. **The proxy**, so unauthorised traffic never reaches the container at all:
+
+   ```nginx
+   # In the server block, before location /
+   if ($http_x_radar_key != "the-same-value") { return 404; }
+   ```
+
+3. **The firmware**, at build time:
+
+   ```bash
+   RADAR_FEED_URL=https://radar.example.com \
+   RADAR_FEED_KEY=the-same-value \
+   pio run -e local -t upload
+   ```
+
+Checking it in both the proxy and the server is deliberate: the proxy config is the
+thing most likely to be edited by hand a year from now, and the server-side check is
+what keeps the gate closed when that happens.
+
+Be clear about what this is. Anyone holding a firmware binary can extract the key, so
+it is worth as much as keeping your binaries to yourself. It stops opportunistic use
+of an endpoint someone stumbles across, which is the actual exposure here, and it is
+not a defence against someone who wants in.
+
+Curl needs the header too once this is on:
+
+```bash
+curl -H "X-Radar-Key: the-same-value" "https://radar.example.com/v1/tags"
+```
 
 Also note the firmware calls `setInsecure()`, so it does not verify the server's
 certificate. Over a LAN that hardly mattered; over the internet it means a
-machine-in-the-middle could impersonate the server, collect a device secret and
-feed false tags. Fixing it means embedding a CA bundle in the firmware, which is
-real work and has its own maintenance cost when roots rotate.
+machine-in-the-middle could impersonate the server, collect a device secret and feed
+false tags. Fixing it means embedding a CA bundle in the firmware, with its own
+maintenance cost when roots rotate, so it is a known gap rather than an oversight.
 
 ## Configuration
 

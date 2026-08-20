@@ -155,6 +155,19 @@ function handleClaim(
   send(res, reply.status, reply.body);
 }
 
+/**
+ * Shared-key gate, when FEED_KEY is set. Compared in constant time out of habit
+ * rather than necessity; the length check leaks nothing worth having.
+ */
+function hasValidKey(req: IncomingMessage): boolean {
+  const expected = config.feedKey;
+  if (expected === '') return true;
+  const given = header(req, 'x-radar-key');
+  const a = Buffer.from(expected);
+  const b = Buffer.from(given);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 function header(req: IncomingMessage, name: string): string {
   const value = req.headers[name];
   if (Array.isArray(value)) return (value[0] ?? '').trim();
@@ -212,8 +225,22 @@ const server = createServer((req, res) => {
       const url = new URL(req.url ?? '/', 'http://internal');
       const route = `${req.method ?? 'GET'} ${url.pathname}`;
 
-      if (route === 'GET /' || route === 'GET /healthz') {
-        send(res, 200, url.pathname === '/healthz' ? 'ok' : usage());
+      // Healthcheck stays open: it runs from inside the container and Docker will
+      // not be sending a key.
+      if (route === 'GET /healthz') {
+        send(res, 200, 'ok');
+        return;
+      }
+
+      if (!hasValidKey(req)) {
+        // 404 rather than 401: a scanner learns nothing about what is here.
+        logRejected({ route, status: 404, reason: 'bad-key' });
+        send(res, 404, 'not found');
+        return;
+      }
+
+      if (route === 'GET /') {
+        send(res, 200, usage());
         return;
       }
       if (route === 'GET /v1/feed') {

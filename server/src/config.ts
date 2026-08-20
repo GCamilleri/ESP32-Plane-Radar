@@ -44,6 +44,16 @@ export const config = {
   claimsPerHour: num('CLAIMS_PER_HOUR', 10),
   maxActiveTags: num('MAX_ACTIVE_TAGS', 64),
 
+  /**
+   * When set, every request must carry `X-Radar-Key` with this value or it is
+   * refused. Empty disables the check.
+   *
+   * Belt to the proxy's braces. Checking it here as well means the gate still holds
+   * if the reverse proxy is reconfigured or bypassed, which is the failure mode that
+   * matters: the proxy is the thing most likely to be edited by hand later.
+   */
+  feedKey: str('FEED_KEY', ''),
+
   /** Rejects replayed signatures. Generous: the ESP32 has no RTC and drifts. */
   maxClockSkewSeconds: num('MAX_CLOCK_SKEW_SECONDS', 600),
 

@@ -400,6 +400,17 @@ WiFiClient& prepareTransport(const char* url) {
   return *wanted;
 }
 
+/**
+ * Shared key on every request to the feed server, so a stranger who finds the
+ * hostname cannot use it. Omitted entirely when unset, which keeps a keyless server
+ * working unchanged.
+ */
+void addProxyAuthHeader(HTTPClient& http) {
+  if (config::kFeedProxyKey[0] != '\0') {
+    http.addHeader("X-Radar-Key", config::kFeedProxyKey);
+  }
+}
+
 bool fetchDirect(double center_lat, double center_lon, float fetch_radius_km);
 bool fetchProxy(double center_lat, double center_lon, float fetch_radius_km);
 void serviceSocialQueue();
@@ -570,6 +581,7 @@ bool fetchProxy(double center_lat, double center_lon, float fetch_radius_km) {
   }
 
   s_http.setTimeout(kRequestTimeoutMs);
+  addProxyAuthHeader(s_http);
   const int code = performGetWithPoll(s_http);
   if (code != HTTP_CODE_OK) {
     Serial.printf("adsb: proxy HTTP %d\n", code);
@@ -673,6 +685,7 @@ void serviceSocialQueue() {
   }
 
   s_http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  addProxyAuthHeader(s_http);
   if (request.is_signed) {
     s_http.addHeader("X-Radar-Device", request.device);
     s_http.addHeader("X-Radar-Ts", request.timestamp);

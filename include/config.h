@@ -99,6 +99,23 @@ constexpr bool kAdsbShowGroundAircraft = false;
 #define RADAR_FEED_PROXY_URL ""
 #endif
 constexpr char kFeedProxyBaseUrl[] = RADAR_FEED_PROXY_URL;
+
+/**
+ * Shared key sent as X-Radar-Key on every request to the feed server. Empty omits
+ * the header entirely.
+ *
+ * This is a gate, not authentication: it stops a stranger who finds the hostname
+ * from spending your adsb.fi budget or filling the tag table, which is the whole
+ * exposure of putting the server on the public internet. Anyone holding a firmware
+ * binary can extract it, so it is worth exactly as much as keeping the binary to
+ * yourself. Check it at the reverse proxy so unauthorised traffic never reaches the
+ * container, and set FEED_KEY on the server too so the check survives a proxy
+ * misconfiguration.
+ */
+#ifndef RADAR_FEED_PROXY_KEY
+#define RADAR_FEED_PROXY_KEY ""
+#endif
+constexpr char kFeedProxyKey[] = RADAR_FEED_PROXY_KEY;
 /**
  * Consecutive proxy failures before the device gives up on it and fetches
  * adsb.fi directly instead. The radar must never depend on the Worker being up,
