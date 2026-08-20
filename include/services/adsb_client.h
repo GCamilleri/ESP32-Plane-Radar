@@ -38,7 +38,7 @@ void setPollFn(PollFn fn);
 /**
  * Which upstream the last completed fetch actually used. The device prefers the
  * proxy when social features are on, but falls back to adsb.fi on its own so a
- * dead or over-quota Worker never takes the radar down with it.
+ * dead or unreachable feed server never takes the radar down with it.
  */
 enum class FeedSource : uint8_t { kDirect, kProxy };
 FeedSource lastFeedSource();

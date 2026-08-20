@@ -9,7 +9,7 @@ namespace services::social {
 
 // Device identity and the claim/release queue for social aircraft tags.
 //
-// This module owns no socket. Requests to the Worker travel on the same keep-alive
+// This module owns no socket. Requests to the server travel on the same keep-alive
 // connection adsb_client already holds for the feed, because both go to the same
 // host. That is deliberate: a second concurrent TLS session would put another
 // ~32 KB of mbedTLS buffers on a board where adsb_client.cpp already documents
@@ -51,7 +51,7 @@ bool registered();
 void saveHandleFromPortal(const char* value);
 
 /**
- * The Worker's clock, learned from the PR1 header. The ESP32 has no RTC, so
+ * The server's clock, learned from the PR1 header. The ESP32 has no RTC, so
  * without this every signed request would be rejected for clock skew.
  */
 void noteServerEpoch(uint32_t epoch);

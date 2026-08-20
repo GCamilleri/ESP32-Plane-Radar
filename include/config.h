@@ -82,13 +82,13 @@ constexpr unsigned long kAdsbFetchIntervalMs = 3000;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
 constexpr bool kAdsbShowGroundAircraft = false;
 
-// --- Social aircraft tags (Cloudflare Worker proxy) ---
+// --- Social aircraft tags (self-hosted feed server, see server/) ---
 /**
- * Worker base URL, no trailing slash. Empty builds a device with no social
+ * Feed server base URL, no trailing slash. Empty builds a device with no social
  * features: the radar then always fetches adsb.fi directly.
  *
- * Deploy worker/ and put your own workers.dev subdomain here, or override at build
- * time for a locally hosted Worker, which is what `pio run -e local` does:
+ * Run server/ and put its hostname here, or override at build time to point at a
+ * server on the LAN, which is what `pio run -e local` does:
  *
  *   RADAR_FEED_URL=http://192.168.1.17:8787 pio run -e local -t upload
  *
@@ -102,7 +102,7 @@ constexpr char kFeedProxyBaseUrl[] = RADAR_FEED_PROXY_URL;
 
 /**
  * Consecutive proxy failures before the device gives up on it and fetches
- * adsb.fi directly instead. The radar must never depend on the Worker being up,
+ * adsb.fi directly instead. The radar must never depend on the server being up,
  * so this is the standalone guarantee in code rather than in a comment.
  */
 constexpr uint8_t kFeedProxyFailuresBeforeBackoff = 3;

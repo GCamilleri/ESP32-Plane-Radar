@@ -34,8 +34,8 @@ PollFn s_poll_fn = nullptr;
 
 // Persistent connection -- avoids a full handshake every poll cycle.
 //
-// Two transports, chosen per URL by scheme. adsb.fi is always TLS, but a
-// self-hosted Worker is commonly plain http:// on a LAN address, which a
+// Two transports, chosen per URL by scheme. adsb.fi is always TLS, but the
+// self-hosted feed server is commonly plain http:// on a LAN address, which a
 // WiFiClientSecure cannot speak to. Only one is ever connected at a time.
 WiFiClientSecure s_tls_client;
 WiFiClient s_plain_client;
@@ -296,7 +296,8 @@ class StreamLineReader {
   size_t consumed_ = 0;
 };
 
-/** Tags carried in one feed response. The Worker caps its own list at 64. */
+/** Tags carried in one feed response. The server caps its own list at 64
+ *  (MAX_FEED_TAGS), which must not exceed this. */
 constexpr size_t kMaxFeedTags = 64;
 
 FeedSource s_last_source = FeedSource::kDirect;
@@ -309,7 +310,7 @@ bool s_proxy_backed_off = false;
 bool proxyConfigured() { return config::kFeedProxyBaseUrl[0] != '\0'; }
 
 /**
- * Whether this poll should go through the Worker. The proxy is the feed whenever
+ * Whether this poll should go through the feed server. The proxy is the feed whenever
  * one is configured; adsb.fi is only ever a fallback, never a mode the user picks.
  *
  * Backing off after repeated failures is what keeps the standalone promise: a
