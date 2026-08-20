@@ -66,10 +66,17 @@ uint8_t labelMode();
 void setLabelMode(uint8_t mode);
 
 // --- Poll rate ---
-constexpr uint8_t kPollRatePresetCount = 3;
+//
+// One setting, two things, because they are the same choice to a user: "Smooth"
+// polls every 3s and dead reckons between polls, and the plain intervals draw
+// reported positions and step once per poll. Index 0 is Smooth, hence a preset for
+// 3s twice over.
+constexpr uint8_t kPollRatePresetCount = 4;
 uint8_t pollRateIndex();
 void setPollRateIndex(uint8_t idx);
 unsigned long pollRateMs();
+/** True when aircraft are drawn at dead-reckoned positions between polls. */
+bool smoothMotion();
 
 // --- Sweep line ---
 bool sweepEnabled();

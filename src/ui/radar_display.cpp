@@ -186,6 +186,12 @@ void initPalette() {
       tft.color565(radar::kSelectR, radar::kSelectG, radar::kSelectB);
 }
 
+/** The aircraft exactly as the feed reported it, for when Smooth is off. */
+motion::Motion reported(const services::adsb::Aircraft& plane) {
+  return motion::Motion{plane.lat, plane.lon, plane.nose_deg, plane.track_deg,
+                        plane.gs_knots};
+}
+
 bool isTagged(const services::adsb::Aircraft& plane) {
   return plane.tag_handle[0] != '\0';
 }
@@ -706,15 +712,18 @@ void drawAircraft() {
   const services::adsb::Aircraft* planes = services::adsb::aircraftList();
   const uint32_t selected_icao = target::selectedIcao();
 
-  // Every position below is the dead-reckoned one, stepped on once per frame here
-  // rather than per aircraft, so all the symbols in a frame share a single instant.
+  // Stepped once per frame rather than per aircraft, so every symbol in a frame
+  // shares one instant. Kept running even with Smooth off, which costs a few
+  // hundred soft-float ops a frame and means switching it back on is immediate
+  // instead of waiting a poll for the table to refill.
   motion::advance(millis());
+  const bool smooth = radar::smoothMotion();
 
   size_t draw_count = 0;
   size_t dot_count = 0;
 
   for (size_t i = 0; i < n; ++i) {
-    const motion::Motion moved = motion::stateFor(planes[i]);
+    const motion::Motion moved = smooth ? motion::stateFor(planes[i]) : reported(planes[i]);
     float dx_km = 0.0f;
     float dy_km = 0.0f;
     float dist_km = 0.0f;

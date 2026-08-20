@@ -17,15 +17,19 @@ constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
 constexpr char kPrefsHeadingKey[] = "heading";
 constexpr char kPrefsLabelModeKey[] = "labels";
-constexpr char kPrefsPollRateKey[] = "pollRate";
+constexpr char kPrefsPollRateKey[] = "pollRate";   // legacy, read only
+constexpr char kPrefsPollModeKey[] = "pollMode";
 constexpr char kPrefsSweepKey[] = "sweep";
 constexpr char kPrefsMilKey[] = "mil";
 constexpr char kPrefsWebPortalKey[] = "webportal";
 constexpr char kPrefsSocialKey[] = "social";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
-constexpr unsigned long kPollRatePresetsMs[] = {3000, 5000, 10000};
-constexpr uint8_t kDefaultPollRateIndex = 0;  // 3s
+// Index 0 is "Smooth": a 3s poll with dead reckoning between polls. The plain
+// intervals that follow draw reported positions and move once per poll.
+constexpr unsigned long kPollRatePresetsMs[] = {3000, 3000, 5000, 10000};
+constexpr uint8_t kDefaultPollRateIndex = 0;  // Smooth
+constexpr uint8_t kSmoothPollRateIndex = 0;
 
 Preferences s_prefs;
 uint8_t s_range_index = kDefaultRangeIndex;
@@ -98,8 +102,23 @@ void rangeInit() {
   const uint8_t labels = s_prefs.getUChar(kPrefsLabelModeKey, 0);
   s_label_mode = (labels < kLabelModeCount) ? labels : 0;
 
-  const uint8_t poll = s_prefs.getUChar(kPrefsPollRateKey, kDefaultPollRateIndex);
-  s_poll_rate_index = (poll < kPollRatePresetCount) ? poll : kDefaultPollRateIndex;
+  // Poll Rate gained "Smooth" at index 0, which pushed 5s and 10s along by one, so
+  // it reads from a new key. Reinterpreting the old one is not possible: a stored 1
+  // means 5s under the old numbering and 3s under the new, and the value carries
+  // nothing that says which. 0xFF stands in for "no key", so no probe is needed.
+  const uint8_t stored = s_prefs.getUChar(kPrefsPollModeKey, 0xFF);
+  if (stored < kPollRatePresetCount) {
+    s_poll_rate_index = stored;
+  } else if (stored == 0xFF) {
+    // Derived from the legacy key on every boot until the setting is next changed,
+    // which is cheaper than a migration write and idempotent. An explicit 5s or 10s
+    // is kept, smoothing off. Old index 0 was the shipped default and so cannot be
+    // told from never having chosen anything, and those devices get Smooth.
+    const uint8_t legacy = s_prefs.getUChar(kPrefsPollRateKey, 0);
+    s_poll_rate_index = legacy == 1 ? 2 : legacy == 2 ? 3 : kDefaultPollRateIndex;
+  } else {
+    s_poll_rate_index = kDefaultPollRateIndex;
+  }
 
   s_sweep_enabled = s_prefs.getBool(kPrefsSweepKey, true);
 
@@ -201,10 +220,12 @@ uint8_t pollRateIndex() { return s_poll_rate_index; }
 void setPollRateIndex(uint8_t idx) {
   if (idx >= kPollRatePresetCount) return;
   s_poll_rate_index = idx;
-  nvsPut<uint8_t>(kPrefsNamespace, kPrefsPollRateKey, idx);
+  nvsPut<uint8_t>(kPrefsNamespace, kPrefsPollModeKey, idx);
 }
 
 unsigned long pollRateMs() { return kPollRatePresetsMs[s_poll_rate_index]; }
+
+bool smoothMotion() { return s_poll_rate_index == kSmoothPollRateIndex; }
 
 bool sweepEnabled() { return s_sweep_enabled; }
 

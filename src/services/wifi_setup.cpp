@@ -85,8 +85,14 @@ char s_miles_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_miles("use_miles", "Display distances in miles", "T", 2,
                                    s_miles_checkbox_attrs, WFM_LABEL_AFTER);
 
+// WiFiManager's input template carries a <br/> *before* each input, and the miles
+// checkbox puts its label after the box, so the label ended up with nothing after
+// it and the next field's label sat right against it. A parameter built from custom
+// HTML alone has no id, and WiFiManager emits those verbatim.
+WiFiManagerParameter s_param_spacer("<br/>");
+
 // Handle shown on other people's radars when this device tags an aircraft. Left
-// blank the Worker derives one from the device id, so the field is optional.
+// blank the server derives one from the device id, so the field is optional.
 constexpr int kHandleParamLen = 4;
 constexpr char kHandleInputAttrs[] =
     " maxlength=\"4\" pattern=\"[A-Za-z0-9]{3,4}\" placeholder=\"3-4 letters/digits\"";
@@ -124,6 +130,7 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_lat);
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
+  wm.addParameter(&s_param_spacer);
   wm.addParameter(&s_param_handle);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
