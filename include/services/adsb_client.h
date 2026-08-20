@@ -29,7 +29,8 @@ void setPollFn(PollFn fn);
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km);
 
 /** Create background fetch task. Call once in setup(). */
-void fetchInit();
+/** Starts the background fetch task. False means no fetches will run. */
+bool fetchInit();
 /** Start an async fetch. No-op if one is already running. */
 void fetchStartAsync(double center_lat, double center_lon, float fetch_radius_km);
 /** True while an async fetch is in progress. */

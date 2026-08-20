@@ -55,6 +55,15 @@ void onRangeTap() {
 }
 
 void handleBootButton() {
+  // Hold-to-reset is driven from here, not from wifiLoop(), so the gesture works
+  // whenever the radar is running: wifiLoop() only polled it while the LAN config
+  // portal was up, and that portal is now off by default.
+  // It is disarmed while the menu is open: the menu selects on a 1 s hold, so a
+  // slightly long press there must not wipe credentials. The menu carries its
+  // own explicit "Reset WiFi" entry for that.
+  bootButtonSetLongPressEnabled(!ui::menu::isOpen());
+  bootButtonPollLongPress();
+
   if (ui::menu::isOpen()) {
     ui::menu::update();
     if (!ui::menu::isOpen()) {
@@ -71,6 +80,10 @@ void handleBootButton() {
 
   if (bootButtonHeldMs() >= config::kBootShortHoldMs && !g_menu_hold_fired) {
     g_menu_hold_fired = true;
+    // Disarm here, not just on the next iteration's gate above: this same
+    // iteration can still enter a blocking reconnect, which polls the long
+    // press itself and would reach 3 s with the menu already open.
+    bootButtonSetLongPressEnabled(false);
     ui::menu::open();
   }
   if (!bootButtonIsHeld()) {
@@ -109,7 +122,9 @@ void setup() {
   services::location::init();
   ui::radar::rangeInit();
   services::adsb::setPollFn(wifiLoop);
-  services::adsb::fetchInit();
+  if (!services::adsb::fetchInit()) {
+    Serial.println("Radar will render but stay empty (no fetch task)");
+  }
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();

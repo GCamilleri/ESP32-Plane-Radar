@@ -7,6 +7,7 @@
 
 #include "data/airports.h"
 #include "hardware/display_font.h"
+#include "services/radar_location.h"
 #include "ui/radar_geo.h"
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
@@ -36,9 +37,9 @@ inline void tierBitSet(uint32_t* bits, size_t i) {
   bits[i >> 5] |= (1u << (i & 31));
 }
 
-// Cached runway screen coordinates.  Recomputed only when the range preset,
-// heading, or runway mode changes.  Location only changes on reboot so it does
-// not need to be tracked here.
+// Cached runway screen coordinates.  Recomputed when the range preset, heading,
+// runway mode or radar location changes.  Location is in the key because the LAN
+// config portal writes new coordinates at runtime, without a reboot.
 struct CachedRunwaySegment {
   int16_t x0, y0, x1, y1;
 };
@@ -55,6 +56,8 @@ size_t s_cached_label_count = 0;
 float s_cached_outer_km = -1.0f;
 float s_cached_heading_deg = -1.0f;
 uint8_t s_cached_runway_mode = 0xFF;
+double s_cached_lat = 1e9;
+double s_cached_lon = 1e9;
 
 bool s_runway_label_ready = false;
 bool s_runway_label_use_vlw = false;
@@ -319,6 +322,8 @@ void rebuildRunwayCache() {
   s_cached_outer_km = radar::rangeCurrent().outer_km;
   s_cached_heading_deg = radar::headingDeg();
   s_cached_runway_mode = radar::runwayMode();
+  s_cached_lat = services::location::lat();
+  s_cached_lon = services::location::lon();
 }
 
 }  // namespace
@@ -334,7 +339,9 @@ void drawAirportRunways(lgfx::LGFXBase& gfx) {
   const uint8_t current_mode = radar::runwayMode();
   if (s_cached_outer_km != current_outer_km ||
       s_cached_heading_deg != current_heading ||
-      s_cached_runway_mode != current_mode) {
+      s_cached_runway_mode != current_mode ||
+      s_cached_lat != services::location::lat() ||
+      s_cached_lon != services::location::lon()) {
     rebuildRunwayCache();
   }
 

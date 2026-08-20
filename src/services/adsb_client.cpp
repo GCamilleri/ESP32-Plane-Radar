@@ -340,13 +340,21 @@ void fetchTaskFn(void*) {
 
 }  // namespace
 
-void fetchInit() {
-  xTaskCreate(fetchTaskFn, "adsb", 8192, nullptr, 1, &s_fetch_task_handle);
+bool fetchInit() {
+  if (xTaskCreate(fetchTaskFn, "adsb", 8192, nullptr, 1,
+                  &s_fetch_task_handle) != pdPASS) {
+    // Leave the handle null so fetchStartAsync() refuses to latch s_async_busy;
+    // otherwise the first request would block every later one forever.
+    s_fetch_task_handle = nullptr;
+    Serial.println("adsb: fetch task creation failed");
+    return false;
+  }
+  return true;
 }
 
 void fetchStartAsync(double center_lat, double center_lon,
                      float fetch_radius_km) {
-  if (s_async_busy) return;
+  if (s_async_busy || s_fetch_task_handle == nullptr) return;
   s_async_lat = center_lat;
   s_async_lon = center_lon;
   s_async_radius_km = fetch_radius_km;

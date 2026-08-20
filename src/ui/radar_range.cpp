@@ -24,7 +24,7 @@ constexpr char kPrefsWebPortalKey[] = "webportal";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
 constexpr unsigned long kPollRatePresetsMs[] = {3000, 5000, 10000};
-constexpr uint8_t kDefaultPollRateIndex = 1;  // 3s
+constexpr uint8_t kDefaultPollRateIndex = 0;  // 3s
 
 Preferences s_prefs;
 uint8_t s_range_index = kDefaultRangeIndex;

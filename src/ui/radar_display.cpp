@@ -761,10 +761,12 @@ void drawStaticGrid(Gfx& gfx) {
   const int cy = radar::kCenterY;
   const int grid_r = radar::kGridOuterRadius;
 
+  // Must precede the first use of the palette globals, or the opening frame
+  // paints with their placeholder initialisers instead of the theme colours.
+  initPalette();
   gfx.fillScreen(radar::gColorBackground);
   drawRings(cx, cy, grid_r);
   drawCrosshairs(cx, cy, grid_r, radar::gColorGrid);
-  initPalette();
   runway::drawAirportRunways(gfx);
   drawCenterDot(cx, cy);
   drawCardinalLabels();
