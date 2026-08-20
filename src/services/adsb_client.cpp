@@ -387,6 +387,7 @@ WiFiClient& prepareTransport(const char* url) {
 bool fetchDirect(double center_lat, double center_lon, float fetch_radius_km);
 bool fetchProxy(double center_lat, double center_lon, float fetch_radius_km);
 void serviceSocialQueue();
+void applySocialOutcomeLocally();
 
 }  // namespace
 
@@ -672,6 +673,56 @@ void serviceSocialQueue() {
   // Replies are a couple of short key=value lines, so a String is cheap here.
   const String body = s_http.getString();
   social::completeRequest(code, body.c_str());
+  applySocialOutcomeLocally();
+}
+
+/**
+ * Reflect a completed claim in the aircraft array straight away.
+ *
+ * The claim is sent *after* the feed for this cycle has already been parsed, so the
+ * server's tag block does not include it until the next poll, and the poll after
+ * that may still be serving a cached block. Waiting for the echo meant watching two
+ * or three cycles pass before your own tag appeared. The next feed response
+ * overwrites this either way, so a rejected claim corrects itself.
+ */
+void applySocialOutcomeLocally() {
+  const social::PendingState state = social::pendingState();
+
+  // Clearing everything carries no ICAO, so it is handled before the lookup.
+  if (state == social::PendingState::kClearedAll) {
+    for (size_t i = 0; i < s_aircraft_count; ++i) {
+      if (s_aircraft[i].tag_is_mine) {
+        s_aircraft[i].tag_handle[0] = '\0';
+        s_aircraft[i].tag_is_mine = false;
+      }
+    }
+    return;
+  }
+
+  const uint32_t icao = social::pendingIcao();
+  if (icao == 0) {
+    return;
+  }
+
+  switch (state) {
+    case social::PendingState::kClaimed: {
+      FeedTag tag = {};
+      tag.icao = icao;
+      std::strncpy(tag.handle, social::handle(), sizeof(tag.handle) - 1);
+      feedApplyTag(s_aircraft, s_aircraft_count, tag, social::handle());
+      break;
+    }
+    case social::PendingState::kReleased:
+      for (size_t i = 0; i < s_aircraft_count; ++i) {
+        if (s_aircraft[i].icao == icao) {
+          s_aircraft[i].tag_handle[0] = '\0';
+          s_aircraft[i].tag_is_mine = false;
+        }
+      }
+      break;
+    default:
+      break;
+  }
 }
 
 }  // namespace

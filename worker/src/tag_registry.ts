@@ -275,6 +275,18 @@ export class TagRegistry extends DurableObject<Env> {
     };
   }
 
+  /**
+   * Release every tag this device owns. Deliberately not rate limited: letting go
+   * of your own tags should never be something the server refuses.
+   */
+  async releaseAll(deviceId: string): Promise<Reply> {
+    const removed = Number(
+      this.ctx.storage.sql.exec('DELETE FROM tags WHERE device = ?', deviceId).rowsWritten,
+    );
+    if (removed > 0) this.snapshot = null;
+    return { status: 200, body: `released=${removed}`, detail: `count=${removed}` };
+  }
+
   /** Release a tag early. Owner only. */
   async release(deviceId: string, icao: string): Promise<Reply> {
     const sql = this.ctx.storage.sql;

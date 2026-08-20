@@ -23,11 +23,12 @@ constexpr char kPrefsHandleKey[] = "handle";
 constexpr char kPathRegister[] = "/v1/register";
 constexpr char kPathTag[] = "/v1/tag";
 constexpr char kPathUntag[] = "/v1/untag";
+constexpr char kPathUntagAll[] = "/v1/untagall";
 
 /** Retry a failed registration no more often than this. */
 constexpr unsigned long kRegisterRetryMs = 30000UL;
 
-enum class Action : uint8_t { kNone, kRegister, kClaim, kRelease };
+enum class Action : uint8_t { kNone, kRegister, kClaim, kRelease, kReleaseAll };
 
 uint8_t s_secret[config::kSocialSecretBytes];
 char s_secret_hex[config::kSocialSecretBytes * 2 + 1];
@@ -283,6 +284,9 @@ uint32_t epochNow() {
 void requestClaim(uint32_t icao) { queueAction(Action::kClaim, icao); }
 void requestRelease(uint32_t icao) { queueAction(Action::kRelease, icao); }
 
+// icao 0: the request is about every tag we own, not one aircraft.
+void requestReleaseAll() { queueAction(Action::kReleaseAll, 0); }
+
 PendingState pendingState() {
   portENTER_CRITICAL(&s_mux);
   const PendingState state = s_state;
@@ -374,11 +378,22 @@ bool nextRequest(Request* out) {
     return false;
   }
 
-  std::strncpy(out->path,
-               action == Action::kClaim ? kPathTag : kPathUntag,
-               sizeof(out->path) - 1);
-  snprintf(out->body, sizeof(out->body), "icao=%06lX",
-           static_cast<unsigned long>(icao & 0xFFFFFFu));
+  const char* path = kPathTag;
+  if (action == Action::kRelease) {
+    path = kPathUntag;
+  } else if (action == Action::kReleaseAll) {
+    path = kPathUntagAll;
+  }
+  std::strncpy(out->path, path, sizeof(out->path) - 1);
+
+  if (action == Action::kReleaseAll) {
+    // No aircraft to name; the device id in the signed headers is the whole
+    // request. The empty body is still covered by the signature.
+    out->body[0] = '\0';
+  } else {
+    snprintf(out->body, sizeof(out->body), "icao=%06lX",
+             static_cast<unsigned long>(icao & 0xFFFFFFu));
+  }
   snprintf(out->timestamp, sizeof(out->timestamp), "%lu",
            static_cast<unsigned long>(now));
 
@@ -426,11 +441,16 @@ void completeRequest(int http_code, const char* body) {
   }
 
   switch (http_code) {
-    case 200:
-      setState(action == Action::kClaim ? PendingState::kClaimed
-                                       : PendingState::kReleased,
-               icao, nullptr);
+    case 200: {
+      PendingState done = PendingState::kReleased;
+      if (action == Action::kClaim) {
+        done = PendingState::kClaimed;
+      } else if (action == Action::kReleaseAll) {
+        done = PendingState::kClearedAll;
+      }
+      setState(done, icao, nullptr);
       break;
+    }
     case 409: {
       char owner[adsb::kTagHandleLen] = {0};
       findReplyValue(body, "handle", owner, sizeof(owner));

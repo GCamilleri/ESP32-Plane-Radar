@@ -98,19 +98,27 @@ constexpr uint8_t kRunwayLabelB = 200;
  * rather than as a different kind of contact.
  *
  * The reticle colour comes from the handle, which is why it is a fixed palette
- * rather than a hash straight to RGB: every entry is legible on the dark
- * background, none of them collide with the red aircraft symbols or the cyan
- * military highlight, and the same tagger renders identically on every radar.
+ * rather than a hash straight to RGB, and the same tagger renders identically on
+ * every radar.
+ *
+ * Chosen by scripts/pick_tag_palette.py rather than by eye. The radar already
+ * spends most of the colour wheel on meaning (red aircraft, cyan military, amber
+ * type, light-blue altitude, magenta track vectors, violet runways, white labels),
+ * and an eyeballed palette put two tags right next to the altitude colour. The
+ * script maximises the worst-case CIELAB distance to every reserved colour, after
+ * quantising to RGB565 because that is what the panel shows. Current worst case is
+ * deltaE 40, where 2.3 is "just noticeable".
+ *
+ * Five entries, not more: handles collide sooner, but two taggers sharing a colour
+ * is far less confusing than a tag being mistaken for an altitude readout. Re-run
+ * the script if any of the reserved colours below ever change.
  */
 constexpr uint8_t kTagPalette[][3] = {
-    {255, 220, 0},    // yellow
-    {0, 255, 130},    // spring green
-    {255, 120, 0},    // orange
-    {255, 0, 190},    // magenta
-    {160, 110, 255},  // violet
-    {255, 110, 150},  // pink
-    {200, 255, 60},   // lime
-    {0, 220, 190},    // teal
+    {255, 44, 140},   // hot pink
+    {99, 255, 181},   // mint
+    {222, 117, 82},   // salmon
+    {214, 255, 41},   // chartreuse
+    {165, 97, 255},   // purple
 };
 constexpr size_t kTagPaletteCount = sizeof(kTagPalette) / sizeof(kTagPalette[0]);
 

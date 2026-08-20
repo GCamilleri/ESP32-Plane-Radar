@@ -38,7 +38,7 @@ export function logFeed(opts: {
 
 /** A tag claimed, refreshed, released, or refused. */
 export function logTag(opts: {
-  action: 'claim' | 'release';
+  action: 'claim' | 'release' | 'release-all';
   device: string;
   handle?: string;
   icao: string;

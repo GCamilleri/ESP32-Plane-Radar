@@ -12,6 +12,9 @@ const MAX_CLOCK_SKEW_SEC = 600;
 const ATTRIBUTION =
   'Aircraft data from adsb.fi (https://adsb.fi/), used under their open data terms.';
 
+/** Cache key for the shared tag block. Also purged on write, see handleClaim. */
+const TAG_CACHE_KEY = 'https://feed.cache.invalid/tags';
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -45,6 +48,9 @@ export default {
 
         case 'POST /v1/untag':
           return await handleClaim(request, env, 'release');
+
+        case 'POST /v1/untagall':
+          return await handleReleaseAll(request, env);
 
         default:
           return text(404, 'not found');
@@ -84,7 +90,7 @@ function text(status: number, body: string): Response {
  */
 async function cachedTagBlock(env: Env): Promise<TagBlock> {
   const cache = caches.default;
-  const key = new Request('https://feed.cache.invalid/tags');
+  const key = new Request(TAG_CACHE_KEY);
 
   const hit = await cache.match(key);
   if (hit) {
@@ -220,6 +226,42 @@ async function handleClaim(
     status: reply.status,
     detail: reply.detail,
   });
+
+  // Purge the cached tag block so the next feed carries this change. Without it the
+  // block could be up to TAG_CACHE_SECONDS stale, which on top of the device's poll
+  // interval meant a tag took two or three cycles to appear on the radar that just
+  // created it.
+  if (reply.status === 200) {
+    await caches.default.delete(new Request(TAG_CACHE_KEY));
+  }
+  return text(reply.status, reply.body);
+}
+
+/** Drop every tag this device owns, for the radar's "Clear Tags" menu action. */
+async function handleReleaseAll(request: Request, env: Env): Promise<Response> {
+  const body = await request.text();
+  const auth = await verifySignature(request, body, env);
+  if ('status' in auth) {
+    logRejected({
+      route: '/v1/untagall',
+      status: auth.status,
+      reason: auth.body,
+      device: request.headers.get('x-radar-device') ?? undefined,
+    });
+    return text(auth.status, auth.body);
+  }
+
+  const reply = await registry(env).releaseAll(auth.deviceId);
+  logTag({
+    action: 'release-all',
+    device: auth.deviceId,
+    icao: '-',
+    status: reply.status,
+    detail: reply.detail,
+  });
+  if (reply.status === 200) {
+    await caches.default.delete(new Request(TAG_CACHE_KEY));
+  }
   return text(reply.status, reply.body);
 }
 

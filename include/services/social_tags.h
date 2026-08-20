@@ -66,6 +66,7 @@ enum class PendingState : uint8_t {
   kInFlight,
   kClaimed,
   kReleased,
+  kClearedAll,
   kDenied,   // someone else holds it; pendingOwner() says who
   kError,
 };
@@ -74,6 +75,11 @@ enum class PendingState : uint8_t {
 void requestClaim(uint32_t icao);
 /** Queue a release of our own tag. */
 void requestRelease(uint32_t icao);
+/**
+ * Queue a release of every tag this device owns. Never refused by the server:
+ * letting go of your own tags is not something worth rate limiting.
+ */
+void requestReleaseAll();
 
 PendingState pendingState();
 uint32_t pendingIcao();
