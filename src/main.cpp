@@ -34,6 +34,12 @@ unsigned long g_wifi_down_since = 0;
 unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_adsb_fetch_ms = 0;
 unsigned long g_last_frame_ms = 0;
+/**
+ * When a fetch last succeeded. Seeded in setup() rather than left at 0, or the
+ * reboot timer would already be 3 minutes expired the moment the radio comes up on a
+ * device whose first fetch is still in flight.
+ */
+unsigned long g_last_fetch_ok_ms = 0;
 uint8_t g_consecutive_fetch_failures = 0;
 
 void showRadarIfConnected() {
@@ -114,6 +120,7 @@ void handleAsyncFetchResult() {
 
   if (ok) {
     g_consecutive_fetch_failures = 0;
+    g_last_fetch_ok_ms = millis();
     ui::radarDisplaySetFetchFailures(0);
     // Here rather than in the fetch task: this is the one moment the array is
     // known to be complete and not being written to.
@@ -141,9 +148,10 @@ void handleAsyncFetchResult() {
     // which is the one thing that reliably clears the mbedTLS allocation failure,
     // and it is the same self-heal the WiFi path already has. Gated on the link
     // being up so a WiFi outage stays with its own timer.
-    if (g_consecutive_fetch_failures >= config::kFetchFailuresBeforeReboot &&
+    if (millis() - g_last_fetch_ok_ms >= config::kFetchDeadRebootMs &&
         WiFi.status() == WL_CONNECTED) {
-      Serial.println("adsb: every fetch failing, rebooting to recover");
+      Serial.printf("adsb: no successful fetch for %lus, rebooting to recover\n",
+                    config::kFetchDeadRebootMs / 1000UL);
       delay(100);
       esp_restart();
     }
@@ -160,6 +168,10 @@ void setup() {
 
   bootButtonInit();
   displayInit();
+  // Before the radio: the frame buffer is by far the largest allocation this
+  // firmware makes, and taking it first is what leaves the rest of the heap in one
+  // piece for mbedTLS. See radarDisplayReserveFrame().
+  ui::radarDisplayReserveFrame();
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
   }
@@ -173,6 +185,7 @@ void setup() {
     Serial.println("Radar will render but stay empty (no fetch task)");
   }
 
+  g_last_fetch_ok_ms = millis();
   if (wifiSetupConnect()) {
     showRadarIfConnected();
   }

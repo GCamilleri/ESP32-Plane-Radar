@@ -996,6 +996,8 @@ void renderFrame() {
 
 }  // namespace
 
+void radarDisplayReserveFrame() { ensureFrameSprite(); }
+
 void radarDisplayDraw() {
   // initPalette() is called inside drawStaticGrid(), no need to repeat here.
   initLabelMetrics();
