@@ -82,41 +82,97 @@ The `/data` mapping matters more than it looks. Device registrations live there,
 a handle determines its own colour, so losing that volume changes what colour every
 radar draws for every tagger.
 
-Then point the radars at it and flash:
-
-```bash
-RADAR_FEED_URL=http://192.168.1.50:8787 pio run -e local -t upload
-```
-
-Check it is working:
+Check it is working from the box itself before putting a proxy in front:
 
 ```bash
 curl "http://192.168.1.50:8787/v1/feed?lat=-36.827&lon=174.6155&dist=20&gnd=0"
 docker logs -f plane-radar-feed
 ```
 
-## Reaching it from outside the house
+Radars point at the public hostname, not this address; see the next section.
 
-Radars elsewhere need a public hostname. [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-tunnel/)
-is free, needs no port forwarding, and works behind CGNAT. It does require a domain
-on Cloudflare DNS.
+## Putting it behind a reverse proxy
 
-1. Cloudflare Zero Trust dashboard → Networks → Tunnels → Create a tunnel.
-2. Add a public hostname, e.g. `radar.example.com`, service
-   `http://plane-radar-feed:8787`.
-3. Copy the tunnel token into `.env` next to the compose file:
-   `TUNNEL_TOKEN=eyJ...`
-4. `docker compose up -d` brings up the `cloudflared` service alongside the server.
-5. Rebuild the firmware with `RADAR_FEED_URL=https://radar.example.com`.
+Radars reach the server over the internet, so it sits behind a hostname on your
+domain. The container listens on plain HTTP; the proxy terminates TLS.
 
-Keep the LAN port published even when tunnelling, so radars at home keep working
-when your internet does not.
+**One thing will silently break tagging if you get it wrong: do not rewrite the
+path.** Writes are signed HMAC-SHA256 over `method\npath\ntimestamp\nbody`, so if
+the proxy serves the feed under a subpath and strips it, or normalises the URI, every
+signature stops matching and claims fail with 401 while the feed keeps working
+perfectly. Give the server its own hostname at the root, and note the missing
+trailing slash on `proxy_pass` below, which is what preserves the URI in nginx.
 
-Two caveats worth knowing. Free-plan tunnels are limited to the root domain and
-single-level subdomains, and section 2.8 of Cloudflare's self-serve terms restricts
-non-HTML content, irrelevant for a few KB of text, but it is why people are told
-not to stream media through a tunnel. Also, TLS terminates at Cloudflare's edge, so
-the tunnel is not end-to-end encryption to your box.
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name radar.example.com;
+
+    # your usual certificate directives here
+
+    # Bodies are a couple of hundred bytes; anything larger is not from a radar.
+    client_max_body_size 8k;
+
+    location / {
+        # No trailing slash: passes the URI through untouched, which the request
+        # signatures depend on.
+        proxy_pass http://192.168.1.50:8787;
+
+        # Keep-alive to the upstream. The radar holds one connection open and
+        # sends its tag POST down the same socket as the feed GET, so closing it
+        # between requests throws away the reason the protocol is shaped this way.
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # A poll is worthless once the next one is due.
+        proxy_read_timeout 15s;
+        proxy_connect_timeout 5s;
+    }
+}
+```
+
+Then build the firmware against the public hostname:
+
+```bash
+RADAR_FEED_URL=https://radar.example.com pio run -e local -t upload
+```
+
+`https` is all the firmware needs to switch to TLS; there is no other change.
+
+### Worth knowing before you expose it
+
+`/v1/feed` is unsigned, and `/v1/register` is open to anyone. On a LAN that was
+fine. On the public internet:
+
+- Anyone who learns the hostname can pull the feed, which spends **your** adsb.fi
+  request budget from **your** IP.
+- Anyone can register a device and then claim aircraft. They cannot touch your
+  tags (release is owner-only) but they can fill `MAX_ACTIVE_TAGS` and crowd
+  yours out.
+
+Neither is catastrophic and neither is hard to bound. The cheapest effective fix is
+a shared header checked at the proxy, so unauthenticated traffic never reaches the
+container:
+
+```nginx
+    # In the server block, before location /
+    if ($http_x_radar_key != "some-long-random-string") { return 404; }
+```
+
+That needs the firmware to send the header, which it does not do yet. Cloudflare
+Access with a Service Auth policy is the tidier version of the same idea (two
+static headers, no proxy config), and it is worth doing if this ever hosts more
+than your own radars.
+
+Also note the firmware calls `setInsecure()`, so it does not verify the server's
+certificate. Over a LAN that hardly mattered; over the internet it means a
+machine-in-the-middle could impersonate the server, collect a device secret and
+feed false tags. Fixing it means embedding a CA bundle in the firmware, which is
+real work and has its own maintenance cost when roots rotate.
 
 ## Configuration
 

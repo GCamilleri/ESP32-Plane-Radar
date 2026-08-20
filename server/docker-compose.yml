@@ -1,17 +1,18 @@
 services:
   plane-radar-feed:
+    # Built and published by .github/workflows/server-image.yml.
     # Swap to `build: .` if you would rather build on the box than pull.
     image: ghcr.io/gcamilleri/plane-radar-feed:latest
     container_name: plane-radar-feed
     restart: unless-stopped
     ports:
-      # Radars on the LAN connect here over plain HTTP. The port has to be
-      # published even when a tunnel is used, so local radars keep working when
-      # your internet does not.
+      # Your reverse proxy points at this. Bind to the LAN address rather than
+      # 0.0.0.0 if you want to be sure nothing but the proxy can reach it.
       - "8787:8787"
     volumes:
       # Device registrations live here. Lose this and every radar re-registers,
-      # which changes their handles and therefore their tag colours.
+      # which changes their handles and so the colour every other radar draws
+      # for them.
       - ./data:/data
     environment:
       LOCK_SECONDS: "1800"
@@ -25,17 +26,3 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-  # Optional: reach the feed from outside the house over HTTPS, without opening a
-  # port or having a static IP. Create the tunnel in the Cloudflare Zero Trust
-  # dashboard, point its public hostname at http://plane-radar-feed:8787, and put
-  # the token in .env as TUNNEL_TOKEN. Delete this service for LAN-only.
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: plane-radar-tunnel
-    restart: unless-stopped
-    command: tunnel --no-autoupdate run
-    environment:
-      TUNNEL_TOKEN: "${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env or remove this service}"
-    depends_on:
-      - plane-radar-feed
