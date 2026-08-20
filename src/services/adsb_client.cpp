@@ -302,6 +302,8 @@ constexpr size_t kMaxFeedTags = 64;
 FeedSource s_last_source = FeedSource::kDirect;
 uint8_t s_proxy_failures = 0;
 unsigned long s_proxy_backoff_until = 0;
+/** Current backoff length, doubled on each failure and reset by a success. */
+unsigned long s_proxy_backoff_ms = config::kFeedProxyBackoffBaseMs;
 bool s_proxy_backed_off = false;
 
 bool proxyConfigured() { return config::kFeedProxyBaseUrl[0] != '\0'; }
@@ -335,13 +337,27 @@ void noteProxyFailure() {
   if (s_proxy_failures < 255) {
     ++s_proxy_failures;
   }
-  if (!s_proxy_backed_off &&
-      s_proxy_failures >= config::kFeedProxyFailuresBeforeBackoff) {
-    s_proxy_backed_off = true;
-    s_proxy_backoff_until = millis() + config::kFeedProxyBackoffMs;
-    Serial.printf("adsb: proxy failed %u times, using adsb.fi directly\n",
-                  static_cast<unsigned>(s_proxy_failures));
+  if (s_proxy_backed_off ||
+      s_proxy_failures < config::kFeedProxyFailuresBeforeBackoff) {
+    return;
   }
+
+  s_proxy_backed_off = true;
+  s_proxy_backoff_until = millis() + s_proxy_backoff_ms;
+  Serial.printf("adsb: proxy failed %u times, using adsb.fi directly for %lus\n",
+                static_cast<unsigned>(s_proxy_failures),
+                s_proxy_backoff_ms / 1000UL);
+
+  // Double for next time. Held here rather than reset on retry so a server that
+  // stays down keeps stepping back instead of probing at a fixed interval.
+  s_proxy_backoff_ms =
+      std::min(s_proxy_backoff_ms * 2, config::kFeedProxyBackoffMaxMs);
+}
+
+/** A working proxy clears the accumulated penalty, not just the current wait. */
+void noteProxySuccess() {
+  s_proxy_failures = 0;
+  s_proxy_backoff_ms = config::kFeedProxyBackoffBaseMs;
 }
 
 void ensureHttpClient() {
@@ -406,14 +422,16 @@ void retryProxyNow() {
     return;
   }
   s_proxy_backed_off = false;
-  s_proxy_failures = 0;
+  // Reset the accumulated penalty too: a user reaching for the tag button is a
+  // stronger signal that the server is back than any timer we could pick.
+  noteProxySuccess();
   Serial.println("adsb: proxy backoff cancelled on user request");
 }
 
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   if (shouldUseProxy()) {
     if (fetchProxy(center_lat, center_lon, fetch_radius_km)) {
-      s_proxy_failures = 0;
+      noteProxySuccess();
       s_last_source = FeedSource::kProxy;
       return true;
     }

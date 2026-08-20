@@ -1,0 +1,7 @@
+node_modules/
+# SQLite lives on a mounted volume in production; this is the local dev copy.
+data/
+*.db
+*.db-wal
+*.db-shm
+.env

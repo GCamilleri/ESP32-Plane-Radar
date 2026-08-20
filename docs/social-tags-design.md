@@ -7,70 +7,91 @@ moderate period.
 
 ## Shape
 
-The Cloudflare Worker in `worker/` is the device's feed. It fetches adsb.fi itself,
-strips the payload to the ten fields the radar draws, merges in the active tags, and
-serves the lot as one line-oriented response. The device makes one request per poll
-to one host.
+The server in `server/` is the device's feed: a Docker container on a home box. It
+fetches adsb.fi itself, strips the payload to the ten fields the radar draws, merges
+in the active tags, and serves the lot as one line-oriented response. The device
+makes one request per poll to one host.
 
-That last point is what makes the whole thing affordable in RAM. The alternative,
-keeping adsb.fi direct and adding a second connection for tags, means two concurrent
+This began as a Cloudflare Worker, which is worth recording because the reasoning
+still shapes the code. Three things moved it onto self-hosted hardware:
+
+- **The request cap.** Workers' free plan allows 100,000 requests/day, which at the
+  firmware's 3s poll is three radars. Self-hosted has no cap.
+- **adsb.fi's rate limit.** They allow 1 request/second per IP, and a Worker put
+  every radar behind Cloudflare's shared egress. Self-hosting makes that budget
+  yours: fairer to them, and predictable for you.
+- **The code got smaller.** Durable Objects and the Cache API exist to work around
+  Workers' execution model. In a normal process they collapse to a SQLite file and a
+  `Map`, "first claim wins" comes free from `node:sqlite` being synchronous on a
+  single-threaded runtime, and the tag snapshot can be invalidated on write instead
+  of expiring on a timer, which removed a two-to-three-cycle delay before your own
+  tag appeared on your own radar.
+
+Self-hosting also fixed a stability problem that was purely local: `wrangler dev`
+exits when a client abandons a request mid-flight, which an ESP32 does, and it
+restarted seven times during one test session. The container took the same abuse
+with zero restarts.
+
+Serving both in one response is also what makes the feature affordable in RAM. The
+alternative, keeping adsb.fi direct and adding a second connection for tags, means two concurrent
 TLS sessions and another ~32 KB of mbedTLS buffers on a board where
 `src/services/adsb_client.cpp` already carries scar tissue from handshakes failing
 on a fragmented heap. Routing everything through one host means the tag POST rides
 the keep-alive socket the feed just used.
 
-Direct adsb.fi access survives as the fallback only. If the Worker fails
-`kFeedProxyFailuresBeforeBackoff` times in a row the device fetches adsb.fi itself
-for `kFeedProxyBackoffMs` and then retries the proxy. That is the standalone
-guarantee in code rather than in a comment: a dead, misconfigured or over-quota
-Worker costs one poll cycle, never the radar.
+Direct adsb.fi access survives as the fallback only. If the server fails
+`kFeedProxyFailuresBeforeBackoff` times in a row, the device fetches adsb.fi itself
+and retries the server after an exponential backoff. That is the standalone
+guarantee in code rather than in a comment: a dead or misconfigured server costs one
+poll cycle, never the radar.
+
+The backoff doubles from `kFeedProxyBackoffBaseMs` (30s) to
+`kFeedProxyBackoffMaxMs` (15 min), and any successful proxy fetch resets it. A flat
+delay could not serve both cases: a server restarted for twenty seconds wants a
+short retry, a server gone for the weekend wants a long one. It was a flat five
+minutes at first, and the cost showed up immediately during testing as a radar
+sitting on the fallback long after the server was back.
+
+Asking to tag also cancels the backoff outright. Claims only travel on the proxy
+connection, so otherwise a deliberate tag could sit unsent for the whole window
+because of an unrelated earlier failure, and a user reaching for the button is a
+better signal that the server is back than any timer.
 
 ## The constraint to watch
 
-Two limits bound this, and neither is Cloudflare compute.
+**adsb.fi allows 1 request/second per IP.** Self-hosting makes that limit yours
+rather than a shared pool's, which is an improvement and still a limit. The aircraft
+block is keyed on a quantised centre (0.05 degree cells, ~5.5 km), so radars in the
+same neighbourhood share a cache entry and therefore one upstream fetch. Upstream
+rate is bounded by `(populated cells) / FEED_CACHE_SECONDS`, independent of how many
+radars you own. Measured with two radars polling every 3s: 68 requests to the server
+produced 21 fetches to adsb.fi.
 
-**Worker requests: 100,000/day on the free plan.** At the firmware's 3s default
-that is 28,800/day/device, so three devices. At 10s it is eleven. For a handful of
-radars this is fine, and the $5/month plan removes the cap without changing any
-code. The Poll Rate menu setting is the lever. `worker/README.md` has the table.
-
-**adsb.fi: 1 request/second per IP.** A Worker puts every device behind
-Cloudflare's shared egress addresses, so this would break at three devices if each
-poll caused an upstream fetch. It does not, because the aircraft block is keyed on a
-quantised centre (0.05 degree cells, ~5.5 km): neighbours share a cache entry and
-therefore an upstream fetch. Upstream rate is bounded by
-`(distinct populated cells) / FEED_CACHE_SECONDS`, independent of device count. This
-is the part with the least headroom; raise the TTL before adding users in scattered
-places.
-
-adsb.fi's terms also restrict the data to personal, non-commercial use and require
-attribution, which the Worker's root endpoint and README carry. Re-serving their
-feed to other people's devices is a grey area worth being aware of, and their stated
-right to terminate access is a real single point of failure that the direct fallback
-partly covers.
+Their terms also restrict the data to personal, non-commercial use and require
+attribution, which `GET /` carries.
 
 ## Data model
 
-The Worker never learns where any device is. It holds a flat list of tags keyed by
+The server never stores where any device is. It holds a flat list of tags keyed by
 ICAO hex; the device joins them onto the aircraft it can already see.
 
 ```
 tag: icao -> { handle, owner_device_id, claimed_at, expires_at }
 ```
 
-Storage is a single **Durable Object** with the SQLite backend, the only backend
-available on the free plan. A DO handles one request at a time, which is what makes
-"first claim wins" correct with no locking of our own. KV cannot express it: 1,000
-writes/day and eventually consistent.
+Storage is a SQLite file. "First claim wins" is correct without any locking of our
+own because `node:sqlite` is a synchronous API on a single-threaded runtime, so a
+claim cannot interleave with another as long as nothing awaits partway through.
+Nothing in `server/src/store.ts` is async, deliberately.
 
 Nothing device-specific appears in the response, which is deliberate. There is no
-"this one is yours" flag; the device compares handles against its own. That keeps
-the whole response byte-identical for every device, so both blocks cache at the edge
-and most polls never reach the DO at all. That matters because Durable Objects have
-their own 100k requests/day and 5M SQLite rows read/day, and hitting the DO once per
-feed poll would drain three budgets in step. The DO also keeps its serialised tag
-block in memory and sweeps expired rows on an alarm, so steady-state reads touch
-zero rows.
+"this one is yours" flag; the device compares handles against its own. That keeps the
+whole response byte-identical for every device, which is what lets the aircraft block
+be shared between neighbouring radars at all.
+
+The tag block is held in memory and invalidated on write, so steady-state polls read
+no rows, and a new tag is in the very next response rather than waiting out a cache
+TTL. Expired tags are swept on a timer so reads never filter a growing table.
 
 ## Identity and abuse
 
@@ -83,7 +104,7 @@ identity; saying otherwise would be worse than saying nothing. What it buys is t
 one device cannot forge a claim under another's handle, and that claims have a
 stable subject to rate limit and revoke.
 
-The ESP32 has no RTC, so the timestamp comes from the Worker's clock as carried in
+The ESP32 has no RTC, so the timestamp comes from the server's clock as carried in
 the PR1 header. Until the first feed response arrives, signed requests are held
 rather than sent with a timestamp that would be rejected for skew.
 
@@ -91,9 +112,11 @@ Server-side policy, all of it off the device: lock duration, tag TTL,
 `CLAIMS_PER_HOUR`, `MAX_ACTIVE_TAGS`, handle charset and length, first-come handle
 uniqueness, and a blocklist to blunt impersonation and slurs.
 
-`/v1/feed` is unsigned so the firmware's hot path stays simple, which leaves the
-request budget open to anyone who finds the URL. Signing would not help, since
-registration is open. A Cloudflare rate limiting rule on the zone is the right tool.
+`/v1/feed` is unsigned so the firmware's hot path stays simple. On Cloudflare that
+left the daily request budget open to anyone who found the URL; self-hosted there is
+no such budget to burn, so the exposure is bandwidth and adsb.fi calls. If the server
+is put behind a Cloudflare Tunnel, a rate limiting rule on the zone is the place to
+bound it.
 
 ## Interaction
 
@@ -141,7 +164,7 @@ which is why `resolveLabels()` computes it inside the loop now.
 Beyond the outer ring there is no room for a reticle, so a tagged aircraft's rim dot
 takes the tagger's colour instead.
 
-## What else could move to the Worker
+## What else could move to the server
 
 The **airport and runway dataset** is the big one, and deliberately not in this
 change. `include/data/airports.h` embeds 29,199 airports and 27,941 runways, close
@@ -164,11 +187,11 @@ paths.
 - `drawAircraftTag()` in `src/ui/radar_display.cpp` is unreachable (only the
   `Placed` variant is called) and was left as found, so it does not draw the handle
   line. Worth deleting rather than maintaining in parallel.
-- `adsb_client` picks its transport from the URL scheme, so a plain-HTTP Worker
-  works today and is how local on-device testing runs (`pio run -e local`). Whether
-  a `workers.dev` subdomain answers on port 80 is still untested; doing without TLS
-  in production would save ~32 KB of heap, and the data is public, but the device
-  secret does cross the wire once at registration.
+- `adsb_client` picks its transport from the URL scheme, so a plain-HTTP LAN server
+  needs no other change, and that is the normal case now: no TLS session means ~32 KB
+  of heap that mbedTLS would otherwise hold. Behind a Cloudflare Tunnel it is HTTPS
+  again. The device secret crosses the wire once at registration, which is worth
+  knowing if the LAN is not trusted.
 - A queued claim gives up after `kSocialRequestTimeoutMs` and the picker stays open
   while one is outstanding, because the picker is the only place the result is
   shown. Without both, a claim made while the proxy was unreachable left the UI
