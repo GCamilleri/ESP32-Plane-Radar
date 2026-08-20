@@ -84,13 +84,21 @@ constexpr bool kAdsbShowGroundAircraft = false;
 
 // --- Social aircraft tags (Cloudflare Worker proxy) ---
 /**
- * Worker base URL, no trailing slash. Leave empty to build a device with no
- * social features at all: the radar then always fetches adsb.fi directly and the
- * Social menu entry reads "n/a".
+ * Worker base URL, no trailing slash. Empty builds a device with no social
+ * features: the radar then always fetches adsb.fi directly.
  *
- * Deploy worker/ and put your own workers.dev subdomain (or custom domain) here.
+ * Deploy worker/ and put your own workers.dev subdomain here, or override at build
+ * time for a locally hosted Worker, which is what `pio run -e local` does:
+ *
+ *   RADAR_FEED_URL=http://192.168.1.17:8787 pio run -e local -t upload
+ *
+ * Both http:// and https:// work; adsb_client picks the transport by scheme, so a
+ * plain-HTTP LAN address needs no other change.
  */
-constexpr char kFeedProxyBaseUrl[] = "";
+#ifndef RADAR_FEED_PROXY_URL
+#define RADAR_FEED_PROXY_URL ""
+#endif
+constexpr char kFeedProxyBaseUrl[] = RADAR_FEED_PROXY_URL;
 /**
  * Consecutive proxy failures before the device gives up on it and fetches
  * adsb.fi directly instead. The radar must never depend on the Worker being up,
@@ -101,6 +109,12 @@ constexpr uint8_t kFeedProxyFailuresBeforeBackoff = 3;
 constexpr unsigned long kFeedProxyBackoffMs = 300000UL;  // 5 min
 /** Exit the target picker after this long with no button activity. */
 constexpr unsigned long kTargetSelectTimeoutMs = 6000UL;
+/**
+ * Give up on a queued claim after this long and report it. Without this a claim
+ * made while the proxy is unreachable sits in the queue and the UI shows
+ * "tagging..." forever, which reads as a hang rather than a failure.
+ */
+constexpr unsigned long kSocialRequestTimeoutMs = 20000UL;
 /**
  * Bytes of NVS-persisted device secret. Generated once from esp_random(). This is
  * an identity for rate limiting, not a credential: registration is open, so

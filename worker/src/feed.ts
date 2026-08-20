@@ -43,6 +43,17 @@ function quantise(value: number): number {
   return Math.round(value / CELL_DEGREES) * CELL_DEGREES;
 }
 
+/** Short cell identifier for logs, so shared upstream fetches are visible. */
+export function cellLabel(req: FeedRequest): string {
+  return `${quantise(req.lat).toFixed(2)}/${quantise(req.lon).toFixed(2)}/${Math.ceil(req.distNm)}`;
+}
+
+export interface AircraftBlock {
+  lines: string[];
+  /** 'hit' means this request cost no adsb.fi fetch. */
+  cache: 'hit' | 'miss';
+}
+
 /**
  * Cache key for the A block. Deliberately not the caller's URL: quantising the
  * centre is what lets neighbouring devices share an upstream fetch.
@@ -130,14 +141,14 @@ function toFeedAircraft(ac: UpstreamAircraft): FeedAircraft | null {
  * kept are the 64 *nearest* rather than whatever order the upstream happened to
  * return. The firmware's direct-fetch fallback cannot do either cheaply.
  */
-export async function aircraftBlock(req: FeedRequest, env: Env): Promise<string[]> {
+export async function aircraftBlock(req: FeedRequest, env: Env): Promise<AircraftBlock> {
   const cache = caches.default;
   const key = cellCacheKey(req);
 
   const hit = await cache.match(key);
   if (hit) {
     const text = await hit.text();
-    return text.length > 0 ? text.split('\n') : [];
+    return { lines: text.length > 0 ? text.split('\n') : [], cache: 'hit' };
   }
 
   const lat = quantise(req.lat).toFixed(4);
@@ -174,7 +185,7 @@ export async function aircraftBlock(req: FeedRequest, env: Env): Promise<string[
       },
     }),
   );
-  return lines;
+  return { lines, cache: 'miss' };
 }
 
 export class FeedUpstreamError extends Error {

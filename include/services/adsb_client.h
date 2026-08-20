@@ -44,6 +44,12 @@ enum class FeedSource : uint8_t { kDirect, kProxy };
 FeedSource lastFeedSource();
 /** True while the proxy is being skipped after repeated failures. */
 bool proxyBackedOff();
+/**
+ * Cancel any backoff so the next poll tries the proxy again. Called when the user
+ * asks to tag something: deliberate intent should not have to wait out a timer
+ * started by an unrelated failure.
+ */
+void retryProxyNow();
 
 /** Fetch aircraft within fetch_radius_km of center_lat/lon. */
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km);

@@ -127,11 +127,18 @@ void pollPendingResult() {
                services::social::pendingOwner());
       services::social::clearPending();
       break;
-    case PendingState::kError:
-      std::strncpy(s_status, "tag failed", sizeof(s_status) - 1);
+    case PendingState::kError: {
+      // Distinguish "we could not reach the server" from "the server said no";
+      // the first is worth retrying, the second is not.
+      const char* reason = services::adsb::lastFeedSource() ==
+                                   services::adsb::FeedSource::kProxy
+                               ? "tag failed"
+                               : "server offline";
+      std::strncpy(s_status, reason, sizeof(s_status) - 1);
       s_status[sizeof(s_status) - 1] = '\0';
       services::social::clearPending();
       break;
+    }
     case PendingState::kIdle:
       break;
   }
@@ -210,7 +217,17 @@ void update() {
     return;
   }
 
-  if (millis() - s_last_interaction_ms >= config::kTargetSelectTimeoutMs) {
+  // Don't close on the idle timer while a claim is outstanding: the picker is the
+  // only place its result is shown, so closing would hide the answer the user is
+  // waiting for. social_tags gives up on its own after
+  // kSocialRequestTimeoutMs, so this cannot stay open indefinitely.
+  const services::social::PendingState pending = services::social::pendingState();
+  const bool awaiting_claim =
+      pending == services::social::PendingState::kQueued ||
+      pending == services::social::PendingState::kInFlight;
+
+  if (!awaiting_claim &&
+      millis() - s_last_interaction_ms >= config::kTargetSelectTimeoutMs) {
     close();
     return;
   }

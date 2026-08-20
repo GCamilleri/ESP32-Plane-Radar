@@ -164,7 +164,15 @@ paths.
 - `drawAircraftTag()` in `src/ui/radar_display.cpp` is unreachable (only the
   `Placed` variant is called) and was left as found, so it does not draw the handle
   line. Worth deleting rather than maintaining in parallel.
-- Whether a `workers.dev` subdomain answers on plain HTTP is untested. It would save
-  the TLS session entirely, and the data is public, but the secret does cross the
-  wire once at registration. Verify with `curl` against a deployment before
-  considering it.
+- `adsb_client` picks its transport from the URL scheme, so a plain-HTTP Worker
+  works today and is how local on-device testing runs (`pio run -e local`). Whether
+  a `workers.dev` subdomain answers on port 80 is still untested; doing without TLS
+  in production would save ~32 KB of heap, and the data is public, but the device
+  secret does cross the wire once at registration.
+- A queued claim gives up after `kSocialRequestTimeoutMs` and the picker stays open
+  while one is outstanding, because the picker is the only place the result is
+  shown. Without both, a claim made while the proxy was unreachable left the UI
+  showing "tagging..." with no resolution.
+- Asking to tag cancels an active proxy backoff. Claims only travel on the proxy
+  connection, so otherwise a deliberate tag could sit unsent for five minutes
+  because of an unrelated earlier failure.

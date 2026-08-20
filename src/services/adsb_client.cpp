@@ -32,10 +32,17 @@ Aircraft s_aircraft[kMaxAircraft];
 size_t s_aircraft_count = 0;
 PollFn s_poll_fn = nullptr;
 
-// Persistent TLS connection -- avoids a full handshake every poll cycle.
+// Persistent connection -- avoids a full handshake every poll cycle.
+//
+// Two transports, chosen per URL by scheme. adsb.fi is always TLS, but a
+// self-hosted Worker is commonly plain http:// on a LAN address, which a
+// WiFiClientSecure cannot speak to. Only one is ever connected at a time.
 WiFiClientSecure s_tls_client;
+WiFiClient s_plain_client;
 HTTPClient s_http;
 bool s_http_initialized = false;
+/** Transport backing the open keep-alive connection, null when there is none. */
+WiFiClient* s_active_client = nullptr;
 
 // ArduinoJson filter -- parse only the fields we actually consume.
 JsonDocument s_json_filter;
@@ -349,6 +356,32 @@ void ensureHttpClient() {
 void dropConnection() {
   s_http.end();
   s_tls_client.stop();
+  s_plain_client.stop();
+  s_active_client = nullptr;
+}
+
+/**
+ * Transport for `url`, with no stale socket left on it.
+ *
+ * Switching scheme tears the other transport down rather than leaving it open:
+ * holding a TLS session's ~32 KB of mbedTLS buffers while talking plain HTTP would
+ * waste exactly the heap this file works hardest to protect.
+ */
+WiFiClient& prepareTransport(const char* url) {
+  const bool plain = std::strncmp(url, "http://", 7) == 0;
+  WiFiClient* wanted =
+      plain ? &s_plain_client : static_cast<WiFiClient*>(&s_tls_client);
+
+  if (s_active_client != wanted) {
+    dropConnection();
+  }
+  s_active_client = wanted;
+
+  if (!wanted->connected()) {
+    s_http.end();
+    wanted->stop();
+  }
+  return *wanted;
 }
 
 bool fetchDirect(double center_lat, double center_lon, float fetch_radius_km);
@@ -366,6 +399,15 @@ const Aircraft* aircraftList() { return s_aircraft; }
 FeedSource lastFeedSource() { return s_last_source; }
 
 bool proxyBackedOff() { return s_proxy_backed_off; }
+
+void retryProxyNow() {
+  if (!s_proxy_backed_off) {
+    return;
+  }
+  s_proxy_backed_off = false;
+  s_proxy_failures = 0;
+  Serial.println("adsb: proxy backoff cancelled on user request");
+}
 
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   if (shouldUseProxy()) {
@@ -404,12 +446,9 @@ bool fetchDirect(double center_lat, double center_lon, float fetch_radius_km) {
   // runs from a recovered heap. On any failure we drop it too, so the next poll
   // reconnects cleanly rather than re-handshaking in place.
   ensureHttpClient();
+  WiFiClient& client = prepareTransport(url);
 
-  if (!s_tls_client.connected()) {
-    dropConnection();
-  }
-
-  if (!s_http.begin(s_tls_client, url)) {
+  if (!s_http.begin(client, url)) {
     Serial.println("adsb: http.begin failed");
     dropConnection();
     return false;
@@ -505,10 +544,8 @@ bool fetchProxy(double center_lat, double center_lon, float fetch_radius_km) {
            config::kAdsbShowGroundAircraft ? 1 : 0);
 
   ensureHttpClient();
-  if (!s_tls_client.connected()) {
-    dropConnection();
-  }
-  if (!s_http.begin(s_tls_client, url)) {
+  WiFiClient& client = prepareTransport(url);
+  if (!s_http.begin(client, url)) {
     Serial.println("adsb: proxy http.begin failed");
     return false;
   }
@@ -609,7 +646,9 @@ void serviceSocialQueue() {
 
   char url[192];
   snprintf(url, sizeof(url), "%s%s", config::kFeedProxyBaseUrl, request.path);
-  if (!s_http.begin(s_tls_client, url)) {
+  // Same host as the feed, so this reuses the socket the GET just left open.
+  WiFiClient& client = prepareTransport(url);
+  if (!s_http.begin(client, url)) {
     social::completeRequest(0, nullptr);
     return;
   }
@@ -699,8 +738,7 @@ void resetConnection() {
   if (s_async_busy) {
     return;
   }
-  s_http.end();
-  s_tls_client.stop();
+  dropConnection();
   s_http_initialized = false;
 }
 

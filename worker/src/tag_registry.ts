@@ -136,7 +136,11 @@ export class TagRegistry extends DurableObject<Env> {
       .toArray()[0];
 
     if (existing && existing.secret !== secret) {
-      return { status: 403, body: 'device id already registered with a different secret' };
+      return {
+        status: 403,
+        body: 'device id already registered with a different secret',
+        detail: 'secret-mismatch',
+      };
     }
 
     let handle = normaliseHandle(requestedHandle);
@@ -153,12 +157,21 @@ export class TagRegistry extends DurableObject<Env> {
       )
       .toArray()[0];
     if (clash) {
-      if (existing) return { status: 409, body: `handle taken\nhandle=${existing.handle}` };
+      if (existing) {
+        return {
+          status: 409,
+          body: `handle taken\nhandle=${existing.handle}`,
+          handle: existing.handle,
+          detail: 'handle-taken',
+        };
+      }
       handle = handleFromDeviceId(deviceId);
       const stillClashing = sql
         .exec<{ id: string }>('SELECT id FROM devices WHERE handle = ?', handle)
         .toArray()[0];
-      if (stillClashing) return { status: 409, body: 'handle taken' };
+      if (stillClashing) {
+        return { status: 409, body: 'handle taken', detail: 'handle-taken' };
+      }
     }
 
     if (existing) {
@@ -172,7 +185,12 @@ export class TagRegistry extends DurableObject<Env> {
         nowSec(),
       );
     }
-    return { status: 200, body: `handle=${handle}\nlock=${this.lockSeconds}` };
+    return {
+      status: 200,
+      body: `handle=${handle}\nlock=${this.lockSeconds}`,
+      handle,
+      fresh: !existing,
+    };
   }
 
   async deviceSecret(deviceId: string): Promise<string | null> {
@@ -193,28 +211,40 @@ export class TagRegistry extends DurableObject<Env> {
     const device = sql
       .exec<DeviceRow>('SELECT * FROM devices WHERE id = ?', deviceId)
       .toArray()[0];
-    if (!device) return { status: 401, body: 'unregistered device' };
+    if (!device) return { status: 401, body: 'unregistered device', detail: 'unregistered' };
 
     const held = sql
       .exec<TagRow>('SELECT * FROM tags WHERE icao = ? AND expires_at > ?', icao, now)
       .toArray()[0];
 
     if (held && held.device !== deviceId) {
-      return { status: 409, body: `held\nhandle=${held.handle}\nttl=${held.expires_at - now}` };
+      return {
+        status: 409,
+        body: `held\nhandle=${held.handle}\nttl=${held.expires_at - now}`,
+        handle: held.handle,
+        detail: 'held-by-other',
+      };
     }
 
     // Refreshes are rate limited too, otherwise one device can hold a tag forever.
     const windowStart = now - (now % 3600);
     const claims = device.window_start === windowStart ? device.claims : 0;
     if (claims >= this.claimsPerHour) {
-      return { status: 429, body: `rate limited\nretry=${windowStart + 3600 - now}` };
+      return {
+        status: 429,
+        body: `rate limited\nretry=${windowStart + 3600 - now}`,
+        handle: device.handle,
+        detail: 'rate-limited',
+      };
     }
 
     if (!held) {
       const active = sql
         .exec<{ n: number }>('SELECT COUNT(*) AS n FROM tags WHERE expires_at > ?', now)
         .toArray()[0].n;
-      if (active >= this.maxActiveTags) return { status: 507, body: 'tag table full' };
+      if (active >= this.maxActiveTags) {
+        return { status: 507, body: 'tag table full', detail: 'table-full' };
+      }
     }
 
     sql.exec(
@@ -238,7 +268,11 @@ export class TagRegistry extends DurableObject<Env> {
       deviceId,
     );
     this.snapshot = null;
-    return { status: 200, body: `claimed\nhandle=${device.handle}\nttl=${this.lockSeconds}` };
+    return {
+      status: 200,
+      body: `claimed\nhandle=${device.handle}\nttl=${this.lockSeconds}`,
+      handle: device.handle,
+    };
   }
 
   /** Release a tag early. Owner only. */
@@ -247,8 +281,10 @@ export class TagRegistry extends DurableObject<Env> {
     const held = sql
       .exec<{ device: string }>('SELECT device FROM tags WHERE icao = ?', icao)
       .toArray()[0];
-    if (!held) return { status: 404, body: 'not tagged' };
-    if (held.device !== deviceId) return { status: 403, body: 'not your tag' };
+    if (!held) return { status: 404, body: 'not tagged', detail: 'not-tagged' };
+    if (held.device !== deviceId) {
+      return { status: 403, body: 'not your tag', detail: 'not-owner' };
+    }
     sql.exec('DELETE FROM tags WHERE icao = ?', icao);
     this.snapshot = null;
     return { status: 200, body: 'released' };

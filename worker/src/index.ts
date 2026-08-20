@@ -1,5 +1,6 @@
 import { envNumber, type Env, type Reply } from './env';
-import { FeedUpstreamError, aircraftBlock, parseFeedRequest } from './feed';
+import { FeedUpstreamError, aircraftBlock, cellLabel, parseFeedRequest } from './feed';
+import { logFeed, logRegister, logRejected, logTag } from './log';
 import { headerLine, normaliseIcao } from './protocol';
 import { TagRegistry, type TagBlock } from './tag_registry';
 
@@ -112,14 +113,29 @@ async function cachedTagBlock(env: Env): Promise<TagBlock> {
 
 async function handleFeed(url: URL, env: Env): Promise<Response> {
   const req = parseFeedRequest(url);
-  if (req === null) return text(400, 'bad lat/lon/dist');
+  if (req === null) {
+    logRejected({ route: '/v1/feed', status: 400, reason: 'bad-params' });
+    return text(400, 'bad lat/lon/dist');
+  }
 
+  const started = Date.now();
   const [aircraft, tags] = await Promise.all([aircraftBlock(req, env), cachedTagBlock(env)]);
+
+  logFeed({
+    lat: req.lat,
+    lon: req.lon,
+    distNm: req.distNm,
+    cell: cellLabel(req),
+    cache: aircraft.cache,
+    aircraft: aircraft.lines.length,
+    tags: tags.lines.length,
+    ms: Date.now() - started,
+  });
 
   const epoch = Math.floor(Date.now() / 1000);
   const body = [
-    headerLine(epoch, tags.lockSeconds, aircraft.length, tags.lines.length),
-    ...aircraft,
+    headerLine(epoch, tags.lockSeconds, aircraft.lines.length, tags.lines.length),
+    ...aircraft.lines,
     ...tags.lines,
   ].join('\n');
 
@@ -146,10 +162,22 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
   const secret = (form.get('secret') ?? '').trim();
   const handle = (form.get('handle') ?? '').trim();
 
-  if (!/^[0-9a-f]{12,32}$/.test(deviceId)) return text(400, 'bad dev');
-  if (!/^[0-9a-f]{32,64}$/.test(secret)) return text(400, 'bad secret');
+  if (!/^[0-9a-f]{12,32}$/.test(deviceId)) {
+    logRejected({ route: '/v1/register', status: 400, reason: 'bad-dev' });
+    return text(400, 'bad dev');
+  }
+  if (!/^[0-9a-f]{32,64}$/.test(secret)) {
+    logRejected({ route: '/v1/register', status: 400, reason: 'bad-secret', device: deviceId });
+    return text(400, 'bad secret');
+  }
 
   const reply = await registry(env).register(deviceId, secret, handle);
+  logRegister({
+    device: deviceId,
+    handle: reply.handle ?? handle,
+    status: reply.status,
+    fresh: reply.fresh === true,
+  });
   return text(reply.status, reply.body);
 }
 
@@ -160,14 +188,38 @@ async function handleClaim(
 ): Promise<Response> {
   const body = await request.text();
   const auth = await verifySignature(request, body, env);
-  if ('status' in auth) return text(auth.status, auth.body);
+  if ('status' in auth) {
+    logRejected({
+      route: action === 'claim' ? '/v1/tag' : '/v1/untag',
+      status: auth.status,
+      reason: auth.body,
+      device: request.headers.get('x-radar-device') ?? undefined,
+    });
+    return text(auth.status, auth.body);
+  }
 
   const icao = normaliseIcao(new URLSearchParams(body).get('icao'));
-  if (icao === null) return text(400, 'bad icao');
+  if (icao === null) {
+    logRejected({
+      route: action === 'claim' ? '/v1/tag' : '/v1/untag',
+      status: 400,
+      reason: 'bad-icao',
+      device: auth.deviceId,
+    });
+    return text(400, 'bad icao');
+  }
 
   const stub = registry(env);
   const reply =
     action === 'claim' ? await stub.claim(auth.deviceId, icao) : await stub.release(auth.deviceId, icao);
+  logTag({
+    action,
+    device: auth.deviceId,
+    handle: reply.handle,
+    icao,
+    status: reply.status,
+    detail: reply.detail,
+  });
   return text(reply.status, reply.body);
 }
 

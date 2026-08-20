@@ -51,6 +51,8 @@ uint32_t s_queued_icao = 0;
 Action s_in_flight_action = Action::kNone;
 PendingState s_state = PendingState::kIdle;
 uint32_t s_pending_icao = 0;
+/** When the current request entered the queue, for the give-up timeout. */
+unsigned long s_pending_since_ms = 0;
 char s_pending_owner[adsb::kTagHandleLen];
 
 void toHex(const uint8_t* bytes, size_t len, char* out) {
@@ -200,8 +202,14 @@ void queueAction(Action action, uint32_t icao) {
   s_queued_icao = icao;
   s_state = PendingState::kQueued;
   s_pending_icao = icao;
+  s_pending_since_ms = millis();
   s_pending_owner[0] = '\0';
   portEXIT_CRITICAL(&s_mux);
+
+  // Claims only travel on the proxy connection, so if the feed has fallen back to
+  // adsb.fi this request has nowhere to go until the backoff expires. Asking to
+  // tag is explicit intent, so it overrides the timer.
+  adsb::retryProxyNow();
 }
 
 }  // namespace
@@ -278,8 +286,25 @@ void requestRelease(uint32_t icao) { queueAction(Action::kRelease, icao); }
 PendingState pendingState() {
   portENTER_CRITICAL(&s_mux);
   const PendingState state = s_state;
+  const unsigned long since = s_pending_since_ms;
   portEXIT_CRITICAL(&s_mux);
-  return state;
+
+  const bool waiting =
+      state == PendingState::kQueued || state == PendingState::kInFlight;
+  if (!waiting || millis() - since < config::kSocialRequestTimeoutMs) {
+    return state;
+  }
+
+  // Timed out. Drop the queued request so it cannot fire much later against an
+  // aircraft the user has long since stopped looking at. If it was already in
+  // flight, completeRequest() may still overwrite this with the real outcome,
+  // which is the better answer when it arrives.
+  portENTER_CRITICAL(&s_mux);
+  s_queued_action = Action::kNone;
+  s_state = PendingState::kError;
+  portEXIT_CRITICAL(&s_mux);
+  Serial.println("social: tag request timed out");
+  return PendingState::kError;
 }
 
 uint32_t pendingIcao() {

@@ -79,6 +79,46 @@ npx wrangler dev
 curl "http://127.0.0.1:8787/v1/feed?lat=-41.3272&lon=174.8053&dist=13&gnd=0"
 ```
 
+## Testing against a radar on your LAN
+
+```bash
+cd worker && script -q /dev/null npx wrangler dev --ip 0.0.0.0    # see notes below
+RADAR_FEED_URL=http://192.168.1.17:8787 pio run -e local -t upload
+```
+
+`--ip 0.0.0.0` is needed or wrangler only listens on loopback. The firmware picks
+its transport from the URL scheme, so a plain `http://` LAN address needs no other
+change.
+
+Two things that will otherwise waste your time:
+
+- **Wrap it in `script -q /dev/null`.** With stdout redirected to a file, wrangler
+  suppresses the worker's own `console.log`, so all the feed and tag logging
+  silently disappears. Giving it a PTY brings it back.
+- **`wrangler dev` exits on abrupt client disconnects.** It logs
+  `Failed to drain the unused request body` / `Network connection lost` and
+  sometimes dies. An ESP32 that gives up on a request mid-flight triggers it, and
+  because the firmware then sees TCP resets it hits its failure threshold and backs
+  off the proxy for five minutes. Supervise the process in a restart loop for a test
+  session. It is a dev-server robustness problem, not something the firmware should
+  be reshaped around; real Cloudflare handles the same traffic fine.
+
+Asking to tag something cancels any active proxy backoff
+(`services::adsb::retryProxyNow()`), so you do not have to wait out the timer after
+restarting the Worker.
+
+Watch traffic and tag events:
+
+```
+feed cell=-36.85/174.60/20 lat=-36.8270 lon=174.6155 dist=20 upstream=fetch ac=5 tags=1 ms=330
+register result=ok status=200 device=54c504b6a0ec handle=3ZW9 state=returning
+tag action=claim result=ok status=200 device=54c504b6a0ec handle=3ZW9 icao=C87F26
+```
+
+`upstream=fetch` means that request cost an adsb.fi call; `upstream=cached` means it
+was served from the shared cell cache, which is the mechanism keeping the upstream
+inside 1 req/s.
+
 ## Capacity, honestly
 
 The free plan allows **100,000 Worker requests/day**, and that is the number this
