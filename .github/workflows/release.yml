@@ -38,9 +38,24 @@ jobs:
         run: pip install --upgrade platformio
 
       - name: Build and merge
+        env:
+          # Baked into public releases so a web-flashed radar has working social tags
+          # with no configuration at all. Not a secret, it is public DNS, and the
+          # server is deliberately open with abuse bounded by per-device tag caps and
+          # an upstream fetch limiter rather than by keeping an address quiet.
+          #
+          # The `local` env is the same build as `supermini` plus this URL. A plain
+          # `pio run` still produces a keyless, serverless firmware, which is what a
+          # contributor building from source should get.
+          #
+          # Consequence worth knowing: every device flashed from a release points here
+          # permanently. If this host goes away those radars fall back to fetching
+          # adsb.fi directly, so they keep working, but their tags go quiet and only a
+          # reflash can move them.
+          RADAR_FEED_URL: https://radar.giannicamilleri.com
         run: |
-          pio run -e supermini
-          pio run -t merge -e supermini
+          pio run -e local
+          pio run -t merge -e local
 
       - name: Package release files
         run: |
@@ -50,11 +65,11 @@ jobs:
           fi
           mkdir -p dist
           # Full image for fresh installs (flash at 0x0). Resets all settings.
-          cp .pio/build/supermini/firmware-merged.bin "dist/plane-radar-${VERSION}.bin"
+          cp .pio/build/local/firmware-merged.bin "dist/plane-radar-${VERSION}.bin"
           sha256sum "dist/plane-radar-${VERSION}.bin" > "dist/plane-radar-${VERSION}.bin.sha256"
           # App-only image for updates that keep settings (flash at 0x10000). Used
           # by both the CLI and the web installer's "Update" button.
-          cp .pio/build/supermini/firmware.bin "dist/plane-radar-app-${VERSION}.bin"
+          cp .pio/build/local/firmware.bin "dist/plane-radar-app-${VERSION}.bin"
           sha256sum "dist/plane-radar-app-${VERSION}.bin" > "dist/plane-radar-app-${VERSION}.bin.sha256"
 
       - name: Publish GitHub Release

@@ -39,12 +39,19 @@ as well as typechecking it.
 
 ## Releasing
 
-Tag with `v*` and push. The `release.yml` GitHub Action builds and attaches the merged binary to a GitHub Release.
+Tag with `v*` and push. The `release.yml` GitHub Action builds and attaches the merged binary to a GitHub Release, and publishes the browser installer to GitHub Pages.
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
+
+Releases are built from the `local` env with `RADAR_FEED_URL` set in the workflow, so
+a web-flashed radar has working social tags with no configuration. A plain
+`pio run` (env `supermini`) leaves the URL empty and produces a firmware with no feed
+server and tags disabled, which is what building from source should give. If the feed
+host ever changes, devices already flashed from a release keep pointing at the old one
+and can only be moved by reflashing.
 
 ## Architecture
 
