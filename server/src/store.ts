@@ -201,6 +201,19 @@ export class TagStore {
     };
   }
 
+  /**
+   * True when this exact device and secret are already on record.
+   *
+   * Registration is idempotent and a device re-registers on every boot, so a
+   * returning device is not minting an identity and must not be rate limited for it.
+   * Getting this wrong locked a radar out of tagging entirely after a handful of
+   * reboots.
+   */
+  isKnownDevice(deviceId: string, secret: string): boolean {
+    const existing = this.device(deviceId);
+    return existing !== undefined && existing.secret === secret;
+  }
+
   deviceSecret(deviceId: string): string | null {
     return this.device(deviceId)?.secret ?? null;
   }

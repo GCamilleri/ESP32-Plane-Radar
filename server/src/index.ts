@@ -94,13 +94,6 @@ async function handleFeed(params: URLSearchParams, res: ServerResponse): Promise
 }
 
 function handleRegister(req: IncomingMessage, body: string, res: ServerResponse): void {
-  const address = clientAddress(req);
-  if (!registrationLimiter.tryAcquire(address)) {
-    logRejected({ route: '/v1/register', status: 429, reason: 'register-rate-limit' });
-    send(res, 429, 'too many registrations');
-    return;
-  }
-
   const form = new URLSearchParams(body);
   const deviceId = (form.get('dev') ?? '').trim();
   const secret = (form.get('secret') ?? '').trim();
@@ -115,6 +108,25 @@ function handleRegister(req: IncomingMessage, body: string, res: ServerResponse)
     logRejected({ route: '/v1/register', status: 400, reason: 'bad-secret', device: deviceId });
     send(res, 400, 'bad secret');
     return;
+  }
+
+  // Rate limit new identities only. A device re-registers on every boot, so counting
+  // returning devices meant a handful of reboots from one address locked a radar out
+  // of tagging with a 429 it could never clear. The limiter exists to stop identities
+  // being minted in bulk, and a device already on record with a matching secret is
+  // not minting anything.
+  if (!store.isKnownDevice(deviceId, secret)) {
+    const address = clientAddress(req);
+    if (!registrationLimiter.tryAcquire(address)) {
+      logRejected({
+        route: '/v1/register',
+        status: 429,
+        reason: 'register-rate-limit',
+        device: deviceId,
+      });
+      send(res, 429, 'too many registrations');
+      return;
+    }
   }
 
   const reply = store.register(deviceId, secret, handle);
