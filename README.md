@@ -79,7 +79,9 @@ On first boot, the device creates a WiFi access point called **PlaneRadar-Setup*
 4. Set your location (latitude/longitude) and preferences
 5. Save -- the device reboots, connects to WiFi, and starts the radar
 
-To reconfigure later, visit **http://plane-radar.local** from any device on the same network.
+Once setup finishes the radar stops transmitting a network of its own, so it adds no 2.4 GHz traffic beyond its own connection.
+
+To reconfigure later, switch **LAN Cfg** to On in the settings menu. That screen then shows the address to visit (`http://plane-radar.local`, and the radar's IP in case your network blocks mDNS) from any device on the same network. It is a web page on the radar's existing connection, not an access point, so no new SSID appears. Switch it back off when you are done.
 
 ## Controls
 

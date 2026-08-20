@@ -370,8 +370,29 @@ bool connectSavedNetwork(bool show_ui) {
   return tryConnectWithUi(ssid, pass, show_ui);
 }
 
+/**
+ * Take the radar's own access point down for good.
+ *
+ * Only the first-time setup portal ever raises one, and WiFiManager closes it
+ * with softAPdisconnect(false), which clears the AP config but leaves the AP
+ * interface up. An idle soft AP still beacons, so the radar would sit there
+ * adding 2.4 GHz traffic next to the band it depends on. Called after every
+ * successful STA connect, so a portal that saved credentials cannot leave one
+ * behind.
+ */
+void ensureSoftApOff() {
+  const wifi_mode_t mode = WiFi.getMode();
+  if ((mode & WIFI_MODE_AP) == 0) {
+    return;
+  }
+  WiFi.softAPdisconnect(true);  // true: drop the interface, not just the config
+  WiFi.mode(WIFI_STA);
+  Serial.println("Soft AP off (radar transmits nothing of its own)");
+}
+
 void onStaConnected() {
   WiFi.setAutoReconnect(true);
+  ensureSoftApOff();
   Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
                 WiFi.localIP().toString().c_str());
 }
@@ -531,6 +552,18 @@ void wifiLoop() {
   } else {
     stopLanWebPortal();
   }
+}
+
+bool wifiLanConfigActive() { return s_wm.getWebPortalActive(); }
+
+const char* wifiLocalIpString() {
+  static char buf[16];
+  if (!wifiLinkUp()) {
+    buf[0] = '\0';
+    return buf;
+  }
+  std::snprintf(buf, sizeof(buf), "%s", WiFi.localIP().toString().c_str());
+  return buf;
 }
 
 bool wifiSetupConnect() {

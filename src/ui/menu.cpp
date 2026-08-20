@@ -61,6 +61,11 @@ uint8_t getSocial() { return radar::socialEnabled() ? 1 : 0; }
 void setSocial(uint8_t v) { radar::setSocialEnabled(v == 1); }
 
 constexpr size_t kHeadingIndex = 1;
+/**
+ * The LAN config entry, which needs its own screen layout: it is the one setting
+ * whose "On" state is useless without an address to type.
+ */
+constexpr size_t kLanConfigIndex = 7;
 constexpr size_t kSettingCount = 9;
 // Action entries, not settings: they fire on hold rather than cycling a value.
 constexpr size_t kClearTagsIndex = kSettingCount;
@@ -78,9 +83,13 @@ const MenuItem kMenuItems[kSettingCount] = {
      getPollRate, setPollRate},
     {"Military", 2, kMilitaryLabels, getMilitary, setMilitary},
     {"Sweep", 2, kSweepLabels, getSweep, setSweep},
-    {"WiFi Cfg", 2, kWebPortalLabels, getWebPortal, setWebPortal},
+    // Named for what it is. "WiFi Cfg" read as "broadcast a setup network", and
+    // people went looking for an SSID that this deliberately never creates.
+    {"LAN Cfg", 2, kWebPortalLabels, getWebPortal, setWebPortal},
     {"Tags", 2, kSocialLabels, getSocial, setSocial},
 };
+
+static_assert(kLanConfigIndex < kSettingCount, "LAN config index out of range");
 
 const char* compassDir(uint16_t deg) {
   switch (deg) {
@@ -115,6 +124,11 @@ uint8_t s_cursor = 0;
 unsigned long s_last_interaction_ms = 0;
 bool s_short_hold_fired = false;
 bool s_needs_redraw = true;
+
+/** How often to re-check whether the LAN portal has finished coming up. */
+constexpr unsigned long kAddressPollMs = 400;
+unsigned long s_last_address_poll_ms = 0;
+bool s_address_shown_active = false;
 
 uint16_t s_color_bg = 0;
 uint16_t s_color_ring = 0;
@@ -252,6 +266,48 @@ void drawMenuScreen() {
   tft.drawString("tap:next  hold:select", cx, 205);
 }
 
+/**
+ * Where to reach the LAN config portal, under the On/Off dots.
+ *
+ * Both forms are shown because either can be the one that works: mDNS is easier
+ * to type but fails on networks that block it, and the raw address always works
+ * but changes with DHCP.
+ */
+void drawLanConfigAddress() {
+  constexpr int kHostY = 160;
+  constexpr int kAddrY = 180;
+  const int cx = radar::kCenterX;
+
+  if (displayFontIsSmooth()) {
+    displayFontSetSmoothSize(tft, 0.68f);
+  } else {
+    tft.setFont(&lgfx::v1::fonts::Font2);
+  }
+  tft.setTextDatum(textdatum_t::middle_center);
+
+  const char* ip = wifiLocalIpString();
+  if (ip[0] == '\0') {
+    tft.setTextColor(s_color_hint, s_color_bg);
+    tft.drawString("waiting for WiFi", cx, kHostY);
+    return;
+  }
+
+  char host[40];
+  snprintf(host, sizeof(host), "%s.local", config::kPortalHostname);
+  tft.setTextColor(s_color_value, s_color_bg);
+  tft.drawString(host, cx, kHostY);
+
+  // Until the server is up the address would be a dead end, so say so rather
+  // than inviting the user to try it.
+  if (wifiLanConfigActive()) {
+    tft.setTextColor(s_color_selected, s_color_bg);
+    tft.drawString(ip, cx, kAddrY);
+  } else {
+    tft.setTextColor(s_color_hint, s_color_bg);
+    tft.drawString("starting...", cx, kAddrY);
+  }
+}
+
 void drawSettingScreen() {
   initColors();
   tft.fillScreen(s_color_bg);
@@ -295,28 +351,37 @@ void drawSettingScreen() {
   } else {
     // Generic setting: value + dot indicators
     const uint8_t val_idx = item.get_value();
+    // The LAN portal serves on the radar's existing address and raises no access
+    // point, so switching it on gives the user nothing to act on unless the
+    // address is on screen. Everything below shifts up to make room for it.
+    const bool show_address = (s_cursor == kLanConfigIndex && val_idx == 1);
+
     if (displayFontIsSmooth()) {
       displayFontSetSmoothSize(tft, 1.2f);
     } else {
       tft.setFont(&lgfx::v1::fonts::FreeSansBold18pt7b);
     }
     tft.setTextColor(s_color_value, s_color_bg);
-    tft.drawString(item.value_labels[val_idx], cx, 120);
+    tft.drawString(item.value_labels[val_idx], cx, show_address ? 104 : 120);
 
     constexpr int kDotRadius = 5;
     constexpr int kDotGap = 16;
     const int dot_count = item.value_count;
     const int dots_width = (dot_count - 1) * kDotGap;
     const int dots_start_x = cx - dots_width / 2;
-    constexpr int kDotsY = 168;
+    const int dots_y = show_address ? 134 : 168;
 
     for (int i = 0; i < dot_count; ++i) {
       const int dx = dots_start_x + i * kDotGap;
       if (i == val_idx) {
-        tft.fillSmoothCircle(dx, kDotsY, kDotRadius, s_color_selected);
+        tft.fillSmoothCircle(dx, dots_y, kDotRadius, s_color_selected);
       } else {
-        tft.drawCircle(dx, kDotsY, kDotRadius, s_color_dim);
+        tft.drawCircle(dx, dots_y, kDotRadius, s_color_dim);
       }
+    }
+
+    if (show_address) {
+      drawLanConfigAddress();
     }
   }
 
@@ -409,6 +474,8 @@ void update() {
         return;
       }
       s_state = State::kSetting;
+      s_address_shown_active = wifiLanConfigActive();
+      s_last_address_poll_ms = millis();
       s_needs_redraw = true;
     } else if (s_state == State::kSetting) {
       s_state = State::kMenu;
@@ -417,6 +484,19 @@ void update() {
   }
   if (!bootButtonIsHeld()) {
     s_short_hold_fired = false;
+  }
+
+  // The address screen is the one screen whose content changes without input:
+  // the portal comes up a moment after the toggle, and the address only appears
+  // once it does. Nothing else here needs a clock.
+  if (s_state == State::kSetting && s_cursor == kLanConfigIndex &&
+      radar::webPortalEnabled() &&
+      millis() - s_last_address_poll_ms >= kAddressPollMs) {
+    s_last_address_poll_ms = millis();
+    if (wifiLanConfigActive() != s_address_shown_active) {
+      s_address_shown_active = wifiLanConfigActive();
+      s_needs_redraw = true;
+    }
   }
 
   if (s_needs_redraw) {

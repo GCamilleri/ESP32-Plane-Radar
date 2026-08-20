@@ -62,7 +62,7 @@ The firmware has four layers. Dependencies flow downward only.
 1. **`main.cpp`** -- Arduino `setup()`/`loop()` entry point. Orchestrates WiFi connection, BOOT button handling, ADS-B polling, and display refresh. No business logic lives here.
 
 2. **`services/`** -- External I/O and persistent state.
-   - `wifi_setup` -- WiFiManager integration, captive portal, mDNS, BOOT button ISR and long-press/tap handling. Owns the WiFiManager instance and portal custom parameters (lat, lon, miles, runways). Also manages the "force portal" NVS flag for credential resets.
+   - `wifi_setup` -- WiFiManager integration, captive portal, mDNS, BOOT button ISR and long-press/tap handling. Owns the WiFiManager instance and portal custom parameters (lat, lon, miles, runways). Also manages the "force portal" NVS flag for credential resets. The "LAN Cfg" menu toggle starts WiFiManager's `startWebPortal()`, an HTTP server on the STA address with no soft AP, so the radar never beacons once setup is done; `ensureSoftApOff()` runs after every STA connect because `shutdownConfigPortal()` closes the setup AP with `softAPdisconnect(false)`, which leaves the interface up.
    - `adsb_client` -- HTTPS client for the feed. Prefers the `server/` feed when `config::kFeedProxyBaseUrl` is set, falling back to `opendata.adsb.fi/api/v3/` after repeated failures. Fills a fixed-size `Aircraft[64]` array. Uses a poll callback (`PollFn`) to keep WiFiManager responsive during HTTP I/O.
    - `adsb_feed` -- Pure parser for the server's line-oriented PR1 format, and the ICAO join that attaches social tags to aircraft. Host-testable, no I/O.
    - `adsb_parse` -- Pure JSON field parsing for the direct adsb.fi fallback path. Host-testable.

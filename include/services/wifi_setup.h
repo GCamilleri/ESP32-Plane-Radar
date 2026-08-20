@@ -11,6 +11,20 @@ bool wifiSetupConnect();
 bool wifiReconnect();
 /** Keeps the LAN config portal alive; call every loop() iteration. */
 void wifiLoop();
+/**
+ * True once the LAN config portal is actually serving.
+ *
+ * The toggle that enables it only records a preference; the server comes up on
+ * the next wifiLoop() and only if the link is up. Without this the menu would
+ * claim the portal is running before it is.
+ */
+bool wifiLanConfigActive();
+/**
+ * STA address as a string, or an empty string when the link is down. The menu
+ * shows it because the LAN portal deliberately runs no access point: there is no
+ * SSID to find, so an address on screen is the only way to reach it.
+ */
+const char* wifiLocalIpString();
 bool wifiBootButtonPressed();
 /** GPIO + interrupt setup; call once early in setup(). */
 void bootButtonInit();
