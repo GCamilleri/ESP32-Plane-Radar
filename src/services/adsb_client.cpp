@@ -690,6 +690,15 @@ void serviceSocialQueue() {
 
   // Replies are a couple of short key=value lines, so a String is cheap here.
   const String body = s_http.getString();
+
+  // Close the request out before returning. The feed GET path deliberately skips
+  // end() to keep its keep-alive session, and GET-then-GET tolerates that, but
+  // leaving a finished POST open poisons the next begin(): every subsequent
+  // connection failed, on the proxy and on the adsb.fi fallback alike, until the
+  // device was rebooted. setReuse(true) means end() resets the client state without
+  // dropping the socket, so the next feed poll still reuses the connection.
+  s_http.end();
+
   social::completeRequest(code, body.c_str());
   applySocialOutcomeLocally();
 }
