@@ -17,6 +17,7 @@
 #include "services/radar_location.h"
 #include "services/social_tags.h"
 #include "services/wifi_setup.h"
+#include "ui/aircraft_motion.h"
 #include "ui/menu.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
@@ -114,6 +115,11 @@ void handleAsyncFetchResult() {
   if (ok) {
     g_consecutive_fetch_failures = 0;
     ui::radarDisplaySetFetchFailures(0);
+    // Here rather than in the fetch task: this is the one moment the array is
+    // known to be complete and not being written to.
+    ui::motion::onSnapshot(services::adsb::aircraftList(),
+                           services::adsb::aircraftCount(), millis(),
+                           services::adsb::lastPositionAgeMs());
   } else {
     if (g_consecutive_fetch_failures < 255) {
       ++g_consecutive_fetch_failures;

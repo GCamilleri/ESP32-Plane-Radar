@@ -42,6 +42,13 @@ void setPollFn(PollFn fn);
  */
 enum class FeedSource : uint8_t { kDirect, kProxy };
 FeedSource lastFeedSource();
+
+/**
+ * How old the positions in the last completed fetch were when the response was
+ * built, in ms. The feed server reports its cache age; the direct adsb.fi path has
+ * nothing to report, so it is 0 there.
+ */
+uint32_t lastPositionAgeMs();
 /** True while the proxy is being skipped after repeated failures. */
 bool proxyBackedOff();
 /**

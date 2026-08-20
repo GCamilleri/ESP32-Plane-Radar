@@ -86,7 +86,13 @@ async function handleFeed(params: URLSearchParams, res: ServerResponse): Promise
     res,
     200,
     [
-      headerLine(epoch, tags.lockSeconds, aircraft.lines.length, tags.lines.length),
+      headerLine(
+        epoch,
+        tags.lockSeconds,
+        aircraft.lines.length,
+        tags.lines.length,
+        aircraft.ageMs,
+      ),
       ...aircraft.lines,
       ...tags.lines,
     ].join('\n'),

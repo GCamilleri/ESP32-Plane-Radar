@@ -2,7 +2,7 @@
 // in src/services/adsb_feed.cpp. Line oriented and comma separated so the ESP32
 // can parse it with strtoul/strtof into a fixed array and allocate nothing.
 //
-//   PR1 <server_epoch> <lock_seconds> <aircraft_count> <tag_count>
+//   PR1 <server_epoch> <lock_seconds> <aircraft_count> <tag_count> <pos_age_ms>
 //   A,<hex>,<lat>,<lon>,<nose>,<track>,<gs>,<callsign>,<type>,<alt>
 //   T,<hex>,<handle>,<ttl_seconds>
 //
@@ -16,6 +16,12 @@
 //   type      up to 4 chars, ICAO type designator, may be empty
 //   alt       pre-formatted, "12000 ft" or "GND", may be empty
 //   handle    3 or 4 chars identifying the device that claimed the tag
+//   pos_age_ms  how old the A block's positions are, so the device can dead reckon
+//               from the right instant instead of assuming every response is fresh
+//
+// pos_age_ms was added after the first firmware shipped, which is why it sits at the
+// end of the header: the device parser takes the first four fields and ignores the
+// rest, so old firmware reads a new header and new firmware reads an old one.
 //
 // The A block depends only on the quantised location and the T block on nothing at
 // all, so both are byte-identical for every device and cache cleanly at the edge.
@@ -85,8 +91,10 @@ export function headerLine(
   lockSeconds: number,
   aircraftCount: number,
   tagCount: number,
+  positionAgeMs = 0,
 ): string {
-  return `${PROTOCOL_VERSION} ${epoch} ${lockSeconds} ${aircraftCount} ${tagCount}`;
+  const age = Math.max(0, Math.round(positionAgeMs));
+  return `${PROTOCOL_VERSION} ${epoch} ${lockSeconds} ${aircraftCount} ${tagCount} ${age}`;
 }
 
 /** A handle is 3-4 chars of [A-Z0-9]. Returns null when the input cannot be coerced. */

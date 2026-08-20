@@ -12,6 +12,7 @@
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 #include "services/adsb_client.h"
+#include "ui/aircraft_motion.h"
 #include "ui/radar_geo.h"
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
@@ -430,6 +431,11 @@ struct AircraftDrawItem {
   int x = 0;
   int y = 0;
   int dist_sq = 0;
+  // Smoothed attitude, carried from the projection pass so the symbol pass does
+  // not have to look the aircraft up in the motion table a second time.
+  float nose_deg = 0.0f;
+  float track_deg = 0.0f;
+  float gs_knots = 0.0f;
 };
 
 struct BeyondDotDrawItem {
@@ -454,6 +460,33 @@ struct LabelPlacement {
 static LabelPlacement s_label_placements[services::adsb::kMaxAircraft];
 static size_t s_label_count = 0;
 
+// Which of the four candidate sides each aircraft's label took last frame.
+//
+// Needed only because the symbols move continuously now: when two candidates are
+// near enough to tied, whichever wins flips from frame to frame and the label
+// visibly flickers between two sides of the aeroplane. Last frame's side is kept
+// unless another beats it by a clear margin.
+struct LabelChoice {
+  uint32_t icao;
+  uint8_t candidate;
+};
+static LabelChoice s_label_choice[services::adsb::kMaxAircraft];
+static LabelChoice s_prev_label_choice[services::adsb::kMaxAircraft];
+static size_t s_label_choice_count = 0;
+static size_t s_prev_label_choice_count = 0;
+
+int previousLabelCandidate(uint32_t icao) {
+  if (icao == 0) {
+    return -1;
+  }
+  for (size_t i = 0; i < s_prev_label_choice_count; ++i) {
+    if (s_prev_label_choice[i].icao == icao) {
+      return s_prev_label_choice[i].candidate;
+    }
+  }
+  return -1;
+}
+
 int overlapArea(int16_t ax, int16_t ay, int16_t aw, int16_t ah,
                 int16_t bx, int16_t by, int16_t bw, int16_t bh) {
   const int ox = std::max(0, std::min(ax + aw, bx + bw) - std::max(ax, bx));
@@ -463,6 +496,12 @@ int overlapArea(int16_t ax, int16_t ay, int16_t aw, int16_t ah,
 
 void resolveLabels(size_t draw_count) {
   s_label_count = 0;
+
+  for (size_t i = 0; i < s_label_choice_count; ++i) {
+    s_prev_label_choice[i] = s_label_choice[i];
+  }
+  s_prev_label_choice_count = s_label_choice_count;
+  s_label_choice_count = 0;
 
   initTagLabelMetrics();
   applyTagStyle();
@@ -509,26 +548,58 @@ void resolveLabels(size_t draw_count) {
          static_cast<int16_t>(ay + symbol_half + gap), true},
     };
 
-    int best_candidate = 0;
-    int best_overlap = INT32_MAX;
-
-    for (int c = 0; c < 4; ++c) {
-      int total_overlap = 0;
+    const auto overlapFor = [&](int c) {
+      int total = 0;
       for (size_t p = 0; p < s_label_count; ++p) {
-        total_overlap += overlapArea(
+        total += overlapArea(
             candidates[c].x, candidates[c].y,
             static_cast<int16_t>(block_w), static_cast<int16_t>(block_h),
             s_label_placements[p].x, s_label_placements[p].y,
             s_label_placements[p].w, s_label_placements[p].h);
       }
-      if (total_overlap == 0) {
-        best_candidate = c;
-        break;
+      return total;
+    };
+
+    // Last frame's side is scored first, so it also wins any tie at zero overlap.
+    const int sticky = previousLabelCandidate(planes[i].icao);
+    int best_candidate = sticky >= 0 ? sticky : 0;
+    int best_overlap = overlapFor(best_candidate);
+    const int sticky_overlap = sticky >= 0 ? best_overlap : INT32_MAX;
+
+    if (best_overlap != 0) {
+      for (int c = 0; c < 4; ++c) {
+        if (c == best_candidate) {
+          continue;
+        }
+        const int total_overlap = overlapFor(c);
+        if (total_overlap == 0) {
+          best_candidate = c;
+          best_overlap = 0;
+          break;
+        }
+        if (total_overlap < best_overlap) {
+          best_overlap = total_overlap;
+          best_candidate = c;
+        }
       }
-      if (total_overlap < best_overlap) {
-        best_overlap = total_overlap;
-        best_candidate = c;
-      }
+    }
+
+    // Keep last frame's side unless another beats it by a quarter of a label's
+    // area: enough to settle a near-tie, small enough that a genuinely better
+    // side still wins. A completely clear side wins outright, since that is a
+    // real change in the picture rather than a tie.
+    const int sticky_margin = (block_w * block_h) / 4;
+    if (sticky >= 0 && !(best_overlap == 0 && sticky_overlap > 0) &&
+        sticky_overlap <= best_overlap + sticky_margin) {
+      best_candidate = sticky;
+    }
+
+    if (s_label_choice_count < services::adsb::kMaxAircraft &&
+        planes[i].icao != 0) {
+      s_label_choice[s_label_choice_count].icao = planes[i].icao;
+      s_label_choice[s_label_choice_count].candidate =
+          static_cast<uint8_t>(best_candidate);
+      ++s_label_choice_count;
     }
 
     auto& placement = s_label_placements[s_label_count];
@@ -635,31 +706,38 @@ void drawAircraft() {
   const services::adsb::Aircraft* planes = services::adsb::aircraftList();
   const uint32_t selected_icao = target::selectedIcao();
 
+  // Every position below is the dead-reckoned one, stepped on once per frame here
+  // rather than per aircraft, so all the symbols in a frame share a single instant.
+  motion::advance(millis());
+
   size_t draw_count = 0;
   size_t dot_count = 0;
 
   for (size_t i = 0; i < n; ++i) {
+    const motion::Motion moved = motion::stateFor(planes[i]);
     float dx_km = 0.0f;
     float dy_km = 0.0f;
     float dist_km = 0.0f;
-    geo::offsetKmFromCenter(planes[i].lat, planes[i].lon, &dx_km, &dy_km, &dist_km);
+    geo::offsetKmFromCenter(moved.lat, moved.lon, &dx_km, &dy_km, &dist_km);
 
     if (isInsideOuterRingKm(dist_km)) {
       int x = 0;
       int y = 0;
-      geo::latLonToScreen(planes[i].lat, planes[i].lon, &x, &y);
+      geo::latLonToScreen(moved.lat, moved.lon, &x, &y);
       s_draw_items[draw_count].index = i;
       s_draw_items[draw_count].x = x;
       s_draw_items[draw_count].y = y;
       s_draw_items[draw_count].dist_sq = geo::distSqFromCenter(x, y);
+      s_draw_items[draw_count].nose_deg = moved.nose_deg;
+      s_draw_items[draw_count].track_deg = moved.track_deg;
+      s_draw_items[draw_count].gs_knots = moved.gs_knots;
       ++draw_count;
       continue;
     }
 
     int dot_x = 0;
     int dot_y = 0;
-    if (!beyondRingEdgeDotFromLatLon(planes[i].lat, planes[i].lon, &dot_x,
-                                     &dot_y)) {
+    if (!beyondRingEdgeDotFromLatLon(moved.lat, moved.lon, &dot_x, &dot_y)) {
       continue;
     }
     s_draw_dots[dot_count].x = dot_x;
@@ -704,10 +782,10 @@ void drawAircraft() {
         mil ? radar::gColorMilitary : radar::gColorAircraft;
     const uint16_t vector_color =
         mil ? radar::gColorMilitary : radar::gColorTrackVector;
-    drawSpeedVector(x, y, planes[i].nose_deg - h_deg,
-                    planes[i].track_deg - h_deg,
-                    planes[i].gs_knots, vector_color);
-    drawHeadingTriangle(x, y, planes[i].nose_deg - h_deg, symbol_color);
+    drawSpeedVector(x, y, s_draw_items[d].nose_deg - h_deg,
+                    s_draw_items[d].track_deg - h_deg,
+                    s_draw_items[d].gs_knots, vector_color);
+    drawHeadingTriangle(x, y, s_draw_items[d].nose_deg - h_deg, symbol_color);
 
     // A tagged aircraft keeps its normal symbol and gains a reticle. Recolouring
     // the symbol would hide whether it is military, which is the one thing the

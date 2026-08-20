@@ -12,25 +12,33 @@
 interface Entry<T> {
   value: T;
   expiresAtMs: number;
+  storedAtMs: number;
 }
 
-export interface StaleResult<T> {
+export interface CacheHit<T> {
   value: T;
-  ageSeconds: number;
+  /**
+   * How long ago the value was stored. The radars need this: it is how old the
+   * aircraft positions in a pooled response are, and their dead reckoning is wrong
+   * by that much if they assume a response is fresh.
+   */
+  ageMs: number;
+  /** How far past its expiry the value is, 0 while it is still fresh. */
+  staleMs: number;
 }
 
 export class TtlCache<T> {
   private readonly entries = new Map<string, Entry<T>>();
 
   /** Fresh value only. */
-  get(key: string): T | undefined {
+  get(key: string): CacheHit<T> | undefined {
     const entry = this.entries.get(key);
     if (entry === undefined || Date.now() >= entry.expiresAtMs) return undefined;
-    return entry.value;
+    return { value: entry.value, ageMs: Date.now() - entry.storedAtMs, staleMs: 0 };
   }
 
   /** Value even if expired, as long as it is within `maxStaleSeconds` of expiry. */
-  getStale(key: string, maxStaleSeconds: number): StaleResult<T> | undefined {
+  getStale(key: string, maxStaleSeconds: number): CacheHit<T> | undefined {
     const entry = this.entries.get(key);
     if (entry === undefined) return undefined;
     const staleMs = Date.now() - entry.expiresAtMs;
@@ -38,11 +46,16 @@ export class TtlCache<T> {
       this.entries.delete(key);
       return undefined;
     }
-    return { value: entry.value, ageSeconds: Math.max(0, Math.round(staleMs / 1000)) };
+    return {
+      value: entry.value,
+      ageMs: Date.now() - entry.storedAtMs,
+      staleMs: Math.max(0, staleMs),
+    };
   }
 
   set(key: string, value: T, ttlSeconds: number): void {
-    this.entries.set(key, { value, expiresAtMs: Date.now() + ttlSeconds * 1000 });
+    const now = Date.now();
+    this.entries.set(key, { value, expiresAtMs: now + ttlSeconds * 1000, storedAtMs: now });
   }
 
   /** Drop anything expired past the point it could still be served as stale. */

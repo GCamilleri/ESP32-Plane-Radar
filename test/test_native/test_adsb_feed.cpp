@@ -36,13 +36,23 @@ Parsed parse(const char* text) {
 
 }  // namespace
 
-TEST_CASE("header carries epoch, lock and counts") {
-  const Parsed p = parse("PR1 1787193390 1800 3 1");
+TEST_CASE("header carries epoch, lock, counts and position age") {
+  const Parsed p = parse("PR1 1787193390 1800 3 1 2400");
   REQUIRE(p.kind == FeedLine::kHeader);
   CHECK(p.header.server_epoch == 1787193390u);
   CHECK(p.header.lock_sec == 1800);
   CHECK(p.header.aircraft_count == 3);
   CHECK(p.header.tag_count == 1);
+  CHECK(p.header.pos_age_ms == 2400u);
+}
+
+TEST_CASE("a header without the position age still parses") {
+  // What a server older than this firmware sends. Age 0 means "assume fresh",
+  // which is how the radar behaved before the field existed.
+  const Parsed p = parse("PR1 1787193390 1800 3 1");
+  REQUIRE(p.kind == FeedLine::kHeader);
+  CHECK(p.header.tag_count == 1);
+  CHECK(p.header.pos_age_ms == 0u);
 }
 
 TEST_CASE("aircraft line fills every field") {

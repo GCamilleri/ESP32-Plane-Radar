@@ -10,7 +10,7 @@ namespace services::adsb {
 // PR1: the line-oriented format served by the Cloudflare Worker proxy. Defined in
 // worker/src/protocol.ts; keep the two in step.
 //
-//   PR1 <server_epoch> <lock_seconds> <aircraft_count> <tag_count>
+//   PR1 <server_epoch> <lock_seconds> <aircraft_count> <tag_count> [<pos_age_ms>]
 //   A,<hex>,<lat>,<lon>,<nose>,<track>,<gs>,<callsign>,<type>,<alt>
 //   T,<hex>,<handle>,<ttl_seconds>
 //
@@ -27,6 +27,16 @@ struct FeedHeader {
   uint16_t lock_sec;
   uint16_t aircraft_count;
   uint16_t tag_count;
+  /**
+   * How old the positions in this response were when it was built, in ms.
+   *
+   * The server pools radars onto one cached fetch per map cell, so a response can
+   * carry positions a few seconds old, and how old varies from poll to poll. The
+   * dead reckoning in ui/aircraft_motion needs that or it tugs every aircraft
+   * backwards whenever a fresher block lands. Optional field: a server that does
+   * not send it leaves this 0, which behaves as it always did.
+   */
+  uint32_t pos_age_ms;
 };
 
 struct FeedTag {

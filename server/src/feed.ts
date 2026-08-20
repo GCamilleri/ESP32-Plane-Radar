@@ -38,6 +38,12 @@ export interface AircraftBlock {
    * limiter refused and a slightly old cell was used instead.
    */
   cache: 'hit' | 'miss' | 'stale';
+  /**
+   * How old these positions are, in ms. Goes out in the PR1 header: pooling radars
+   * onto one fetch per cell is what keeps us inside adsb.fi's rate limit, and this
+   * is what stops that pooling showing up as a stutter on the radars.
+   */
+  ageMs: number;
   /** Seconds out of date, when `cache` is 'stale'. */
   ageSeconds?: number;
 }
@@ -147,14 +153,19 @@ function toFeedAircraft(ac: UpstreamAircraft): FeedAircraft | null {
 export async function aircraftBlock(req: FeedRequest): Promise<AircraftBlock> {
   const key = cellLabel(req);
   const cached = cellCache.get(key);
-  if (cached !== undefined) return { lines: cached, cache: 'hit' };
+  if (cached !== undefined) return { lines: cached.value, cache: 'hit', ageMs: cached.ageMs };
 
   // Cache miss, so this would cost an upstream fetch. If that would breach the
   // interval, fall back to whatever we last had for this cell.
   if (!upstreamLimiter.tryAcquire()) {
     const stale = cellCache.getStale(key, config.maxStaleSeconds);
     if (stale !== undefined) {
-      return { lines: stale.value, cache: 'stale', ageSeconds: stale.ageSeconds };
+      return {
+        lines: stale.value,
+        cache: 'stale',
+        ageMs: stale.ageMs,
+        ageSeconds: Math.round(stale.staleMs / 1000),
+      };
     }
     throw new FeedUpstreamError('upstream rate limited and no cached cell', 0);
   }
@@ -192,7 +203,9 @@ export async function aircraftBlock(req: FeedRequest): Promise<AircraftBlock> {
     .map(aircraftLine);
 
   cellCache.set(key, lines, config.feedCacheSeconds);
-  return { lines, cache: 'miss' };
+  // Age 0: whatever adsb.fi's own latency is, we cannot see it from here, and the
+  // one part we can account for is how long we then held the block ourselves.
+  return { lines, cache: 'miss', ageMs: 0 };
 }
 
 export function sweepFeedCache(): void {

@@ -301,6 +301,7 @@ class StreamLineReader {
 constexpr size_t kMaxFeedTags = 64;
 
 FeedSource s_last_source = FeedSource::kDirect;
+uint32_t s_last_position_age_ms = 0;
 uint8_t s_proxy_failures = 0;
 unsigned long s_proxy_backoff_until = 0;
 /** Current backoff length, doubled on each failure and reset by a success. */
@@ -415,6 +416,8 @@ size_t aircraftCount() { return s_aircraft_count; }
 const Aircraft* aircraftList() { return s_aircraft; }
 
 FeedSource lastFeedSource() { return s_last_source; }
+
+uint32_t lastPositionAgeMs() { return s_last_position_age_ms; }
 
 bool proxyBackedOff() { return s_proxy_backed_off; }
 
@@ -550,6 +553,9 @@ bool fetchDirect(double center_lat, double center_lon, float fetch_radius_km) {
   }
 
   s_aircraft_count = n;
+  // adsb.fi's own response carries a timestamp per aircraft, but the fallback path
+  // deliberately parses the minimum, so the smoothing gets no age hint here.
+  s_last_position_age_ms = 0;
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
   return true;
 }
@@ -644,8 +650,12 @@ bool fetchProxy(double center_lat, double center_lon, float fetch_radius_km) {
 
   drainRemainder(stream, content_length, reader.bytesConsumed(), deadline);
   s_aircraft_count = n;
-  Serial.printf("adsb: %u aircraft, %u tags (proxy)\n",
-                static_cast<unsigned>(n), static_cast<unsigned>(tag_count));
+  // Bounded before it reaches the smoothing: a server sending nonsense here should
+  // cost accuracy, not put every aircraft minutes from where it is.
+  s_last_position_age_ms = std::min<uint32_t>(header.pos_age_ms, 60000);
+  Serial.printf("adsb: %u aircraft, %u tags (proxy), pos age %ums\n",
+                static_cast<unsigned>(n), static_cast<unsigned>(tag_count),
+                static_cast<unsigned>(s_last_position_age_ms));
 
   // Same host, same keep-alive socket: piggybacking the claim here is what keeps
   // the device down to a single TLS session.

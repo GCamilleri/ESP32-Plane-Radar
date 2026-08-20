@@ -91,10 +91,14 @@ FeedLine parseHeader(char* cursor, FeedHeader* header) {
       tag_count == nullptr) {
     return FeedLine::kInvalid;
   }
+  // Trailing field, and its absence is not an error: a device flashed before the
+  // server grew it still has to work, and so does a device newer than the server.
+  const char* pos_age = nextSpaceField(&cursor);
   header->server_epoch = static_cast<uint32_t>(parseUlongField(epoch));
   header->lock_sec = static_cast<uint16_t>(parseUlongField(lock));
   header->aircraft_count = static_cast<uint16_t>(parseUlongField(ac_count));
   header->tag_count = static_cast<uint16_t>(parseUlongField(tag_count));
+  header->pos_age_ms = static_cast<uint32_t>(parseUlongField(pos_age));
   return FeedLine::kHeader;
 }
 

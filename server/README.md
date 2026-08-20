@@ -31,7 +31,7 @@ GET /v1/feed?lat=-36.8270&lon=174.6155&dist=20&gnd=0
 ```
 
 ```
-PR1 1787198230 1800 3 1
+PR1 1787198230 1800 3 1 2143
 A,C87F23,-36.77660,174.65286,235,232,103,TEXSIL,TEX2,-75 ft
 A,C81C27,-36.79358,174.44161,67,67,83,ZKMBZ,PA38,1100 ft
 A,C82513,-36.97728,174.71528,301,310,104,GBA109,C208,1650 ft
@@ -41,6 +41,11 @@ T,C87F23,ZQN,1731
 `A` lines are aircraft, `T` lines are active tags, and the device joins them on the
 ICAO hex. The format is defined in `src/protocol.ts` and parsed by
 `src/services/adsb_feed.cpp` in the firmware, with host tests pinning the contract.
+
+The header's last field is how old those positions are in milliseconds, 2143 above.
+Radars looking at the same area share one cached fetch, so a response is usually not
+brand new, and the device dead reckons aircraft forward between polls: told the wrong
+age, it would tug every aeroplane backwards each time a fresher block landed.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
