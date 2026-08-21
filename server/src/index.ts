@@ -347,8 +347,8 @@ function usage(): string {
   return [
     'plane-radar-feed (self-hosted)',
     '',
-    'GET  /v1/feed?lat=&lon=&dist=&gnd=  aircraft + active tags, PR1 format',
-    'GET  /v1/tags                       active tags only',
+    'GET  /v1/feed?lat=&lon=&dist=&gnd=  aircraft + current tags, PR1 format',
+    'GET  /v1/tags                       current tags only',
     'GET  /healthz                       liveness',
     'POST /v1/register                   dev, secret, handle',
     'POST /v1/tag                        icao (signed)',
@@ -363,7 +363,7 @@ const sweeper = setInterval(() => {
   const removed = store.sweep();
   sweepFeedCache();
   registrationLimiter.sweep();
-  if (removed > 0) logInfo('sweep', { expired: removed });
+  if (removed > 0) logInfo('sweep', { retired: removed });
 }, config.sweepIntervalMs);
 sweeper.unref();
 

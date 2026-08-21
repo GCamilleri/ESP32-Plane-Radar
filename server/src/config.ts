@@ -26,8 +26,21 @@ export const config = {
   /** Where the SQLite file lives. Mount this path as a volume to keep handles. */
   dbPath: str('DB_PATH', '/data/tags.db'),
 
-  /** How long a claim holds an aircraft against other devices. */
-  lockSeconds: num('LOCK_SECONDS', 1800),
+  /**
+   * How long a claim holds an aircraft exclusively.
+   *
+   * Not the tag's lifetime: the tag stays until its owner releases it or another
+   * device takes it over, and this is only how long that takeover is refused. Set it
+   * very high and a tag is effectively permanent to everyone but its owner.
+   */
+  lockSeconds: num('LOCK_SECONDS', 3600),
+
+  /**
+   * Optional age at which a tag is forgotten, counted from when it was claimed.
+   * Zero, the default, keeps tags forever: they leave the table by being released or
+   * taken over, not by getting old.
+   */
+  tagRetentionSeconds: num('TAG_RETENTION_SECONDS', 0),
 
   /**
    * Floor on how often a single map cell can hit adsb.fi, whose public limit is
@@ -44,10 +57,13 @@ export const config = {
   /**
    * How many aircraft one device may hold tags on at once.
    *
-   * A concurrency cap, not a rate limit: an expired or released tag frees its slot
-   * immediately, and refreshing a tag you already hold does not consume another.
-   * That makes it behave the way a user expects, where the earlier hourly counter
-   * both counted refreshes and never gave slots back.
+   * A concurrency cap, not a rate limit: a released tag frees its slot immediately,
+   * as does one another device takes over, and refreshing a tag you already hold does
+   * not consume another. That makes it behave the way a user expects, where the
+   * earlier hourly counter both counted refreshes and never gave slots back.
+   *
+   * Since tags no longer expire, this is the number of aircraft one device can have
+   * tagged on the map at once, and it stays occupied until the owner lets go.
    */
   maxTagsPerDevice: num('MAX_TAGS_PER_DEVICE', 10),
 
@@ -85,7 +101,7 @@ export const config = {
   /** Rejects replayed signatures. Generous: the ESP32 has no RTC and drifts. */
   maxClockSkewSeconds: num('MAX_CLOCK_SKEW_SECONDS', 600),
 
-  /** How often expired tags are swept out of the table. */
+  /** How often the feed cache, the limiter and any tag retention are swept. */
   sweepIntervalMs: num('SWEEP_INTERVAL_MS', 60_000),
 
   /** Upstream request timeout. Keeps a slow adsb.fi from stacking up requests. */

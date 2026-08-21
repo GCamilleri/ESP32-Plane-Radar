@@ -176,7 +176,7 @@ Anyone can build a radar and point it here, which is the intent. There is no sha
 key and nothing to onboard: flash, set your location, done.
 
 That is a deliberate choice about what is worth defending. The server proxies public
-data, holds at most 64 tag rows with a 30 minute TTL, and stores device
+data, holds a tag row per tagged aircraft, and stores device
 registrations. What is in the database is random secrets, four-character handles and
 ICAO hexes; it never stores where any device is. Writes are signed per device, so
 nobody can claim under your handle or release your tags. There is no privileged
@@ -197,8 +197,10 @@ cell exists, the request 502s, the firmware counts a proxy failure and falls bac
 adsb.fi directly, which is the correct outcome.
 
 **Tag crowding.** `MAX_TAGS_PER_DEVICE` (10) caps how many aircraft one device holds
-at once. It is a concurrency cap, not a rate limit: an expired or released tag frees
-its slot immediately, and refreshing a tag you already hold consumes nothing.
+at once. It is a concurrency cap, not a rate limit: a released tag frees its slot
+immediately, as does one another device takes over after the lock runs out, and
+refreshing a tag you already hold consumes nothing. Tags do not expire on their own,
+so a slot stays occupied until one of those happens.
 `REGISTRATIONS_PER_HOUR_PER_IP` stops anyone minting identities in bulk to get
 around it. If someone does abuse it anyway, the escalation is deleting their rows
 from `devices`, which is reactive and about right at this scale.
@@ -225,8 +227,9 @@ All optional; the defaults suit a home server.
 | `PORT` | `8787` | |
 | `HOST` | `0.0.0.0` | Must stay `0.0.0.0` inside a container |
 | `DB_PATH` | `/data/tags.db` | Keep on a mounted volume |
-| `LOCK_SECONDS` | `1800` | How long a claim holds an aircraft |
-| `MAX_TAGS_PER_DEVICE` | `10` | Concurrent tags per device; expiry frees a slot |
+| `LOCK_SECONDS` | `3600` | How long a claim holds an aircraft exclusively. Tags do not expire; this is only when another device may take one over |
+| `TAG_RETENTION_SECONDS` | `0` | Forget tags this long after they were claimed. `0` keeps them until released or taken over |
+| `MAX_TAGS_PER_DEVICE` | `10` | Concurrent tags per device; a release or a takeover frees a slot |
 | `MAX_FEED_TAGS` | `64` | Response size bound only, never refuses a claim. Must not exceed the firmware's `kMaxFeedTags` |
 | `FEED_CACHE_SECONDS` | `4` | Cache TTL per map cell |
 | `UPSTREAM_MIN_INTERVAL_MS` | `1000` | Hard floor between adsb.fi fetches, all clients |

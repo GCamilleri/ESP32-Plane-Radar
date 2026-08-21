@@ -2,8 +2,15 @@
 
 Users tag an interesting aircraft on their own radar. Other radars show that tag
 when the same aircraft passes through their range, along with a short handle
-identifying who tagged it. A tagged aircraft is locked to its original tagger for a
-moderate period.
+identifying who tagged it. A tag has no expiry: it stays on the aircraft until its
+owner releases it or another radar takes it over, and a takeover is refused for the
+first `LOCK_SECONDS` (an hour) after the claim.
+
+Those are two separate clocks and it is worth being precise about which is which.
+Tags used to be leases, so an untouched tag vanished after half an hour and the
+aircraft went back to being unlabelled, which read as the server forgetting. Now the
+label persists and only the exclusivity runs out: after an hour, the next radar to
+claim that aircraft gets it, and the previous owner gets its slot back.
 
 ## Shape
 
@@ -76,8 +83,12 @@ The server never stores where any device is. It holds a flat list of tags keyed 
 ICAO hex; the device joins them onto the aircraft it can already see.
 
 ```
-tag: icao -> { handle, owner_device_id, claimed_at, expires_at }
+tag: icao -> { handle, owner_device_id, claimed_at, locked_until }
 ```
+
+`locked_until` is the takeover clock, not a lifetime, and a row past it is still a
+live tag. Older databases carry the same column under its old name `expires_at`; the
+store renames it on open rather than dropping anyone's tags.
 
 Storage is a SQLite file. "First claim wins" is correct without any locking of our
 own because `node:sqlite` is a synchronous API on a single-threaded runtime, so a
@@ -91,7 +102,17 @@ be shared between neighbouring radars at all.
 
 The tag block is held in memory and invalidated on write, so steady-state polls read
 no rows, and a new tag is in the very next response rather than waiting out a cache
-TTL. Expired tags are swept on a timer so reads never filter a growing table.
+TTL. Nothing is swept by default now that tags outlive their lock: the table is
+bounded by `MAX_TAGS_PER_DEVICE` times the number of devices, and rows leave it by
+being released or taken over. `TAG_RETENTION_SECONDS` exists for an operator who
+wants them forgotten eventually anyway.
+
+The one real cost of permanent tags is that `MAX_FEED_TAGS` (64) now bites: the
+response carries the most recently claimed tags, so once there are more than that in
+total, an old tag can be held and still not appear in the feed. Selecting tags per
+request would fix it and would also make the response device-specific, which is the
+thing that lets neighbouring radars share a cached aircraft block, so it is not worth
+it until the tag count actually gets there.
 
 ## Identity and abuse
 
@@ -108,7 +129,7 @@ The ESP32 has no RTC, so the timestamp comes from the server's clock as carried 
 the PR1 header. Until the first feed response arrives, signed requests are held
 rather than sent with a timestamp that would be rejected for skew.
 
-Server-side policy, all of it off the device: lock duration, tag TTL,
+Server-side policy, all of it off the device: lock duration, tag retention,
 `MAX_TAGS_PER_DEVICE`, handle charset and length, first-come handle uniqueness, and a
 blocklist to blunt impersonation and slurs.
 
@@ -130,11 +151,12 @@ What is left to protect is availability, not secrecy, so the controls are limits
   fetches without making many requests. When the limiter refuses, a cell up to
   `MAX_STALE_SECONDS` old is served instead: slightly stale aircraft beat both a
   failed poll and a restricted address.
-- **`MAX_TAGS_PER_DEVICE`** caps concurrent tags per device. Counted from unexpired
-  rows rather than a stored tally, so an expired or released tag frees its slot at
-  once and refreshing a tag you hold costs nothing. The earlier design was an hourly
-  counter, which both counted refreshes and never gave slots back: it measured the
-  wrong thing.
+- **`MAX_TAGS_PER_DEVICE`** caps concurrent tags per device. Counted from rows rather
+  than a stored tally, so a released or taken-over tag frees its slot at once and
+  refreshing a tag you hold costs nothing. Because tags no longer expire, a slot stays
+  occupied until the owner lets go, which makes the cap "ten aircraft on the map at
+  once" rather than "ten per half hour". The earlier design was an hourly counter,
+  which both counted refreshes and never gave slots back: it measured the wrong thing.
 - **`REGISTRATIONS_PER_HOUR_PER_IP`** stops identities being minted in bulk to get
   around the per-device cap.
 

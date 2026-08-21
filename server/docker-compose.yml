@@ -20,9 +20,11 @@ services:
       # Unraid's nobody:users; on other hosts use the owner of ./data.
       PUID: "99"
       PGID: "100"
-      LOCK_SECONDS: "1800"
-      # Aircraft one device may hold tags on at once. An expired or released tag
-      # frees its slot immediately.
+      # How long a claim is exclusive. Tags themselves do not expire: after this,
+      # another radar may take the aircraft over, and until then nobody can.
+      LOCK_SECONDS: "3600"
+      # Aircraft one device may hold tags on at once. A released tag frees its slot
+      # immediately, as does one another radar takes over.
       MAX_TAGS_PER_DEVICE: "10"
       # Floor on how often one map cell can hit adsb.fi. The hard ceiling is
       # UPSTREAM_MIN_INTERVAL_MS below; this just keeps popular cells cheap.

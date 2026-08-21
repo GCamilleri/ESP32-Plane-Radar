@@ -16,6 +16,9 @@
 //   type      up to 4 chars, ICAO type designator, may be empty
 //   alt       pre-formatted, "12000 ft" or "GND", may be empty
 //   handle    3 or 4 chars identifying the device that claimed the tag
+//   ttl       seconds of exclusivity left on the tag, 0 once any device may claim it.
+//             Not a lifetime: a tag stays until it is released or taken over, so the
+//             field never means "this tag is about to disappear".
 //   pos_age_ms  how old the A block's positions are, so the device can dead reckon
 //               from the right instant instead of assuming every response is fresh
 //

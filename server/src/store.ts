@@ -46,7 +46,8 @@ interface TagRow {
   icao: string;
   handle: string;
   device: string;
-  expires_at: number;
+  claimed_at: number;
+  locked_until: number;
 }
 
 function nowSec(): number {
@@ -83,14 +84,15 @@ export class TagStore {
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec('PRAGMA synchronous = NORMAL');
     this.db.exec(`CREATE TABLE IF NOT EXISTS tags (
-      icao       TEXT PRIMARY KEY,
-      handle     TEXT NOT NULL,
-      device     TEXT NOT NULL,
-      claimed_at INTEGER NOT NULL,
-      expires_at INTEGER NOT NULL
+      icao         TEXT PRIMARY KEY,
+      handle       TEXT NOT NULL,
+      device       TEXT NOT NULL,
+      claimed_at   INTEGER NOT NULL,
+      locked_until INTEGER NOT NULL
     )`);
-    // No claim counters: the per-device limit is a count of unexpired rows in `tags`,
-    // so it needs no bookkeeping here and cannot drift out of step with reality.
+    this.migrateExpiryToLock();
+    // No claim counters: the per-device limit is a count of rows in `tags`, so it
+    // needs no bookkeeping here and cannot drift out of step with reality.
     // Databases created before this may still carry unused claims/window_start
     // columns, which is harmless.
     this.db.exec(`CREATE TABLE IF NOT EXISTS devices (
@@ -100,20 +102,45 @@ export class TagStore {
       created_at INTEGER NOT NULL
     )`);
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS devices_handle ON devices (handle)');
-    this.db.exec('CREATE INDEX IF NOT EXISTS tags_expiry ON tags (expires_at)');
-    // The per-device cap counts unexpired rows for one device on every claim.
-    this.db.exec('CREATE INDEX IF NOT EXISTS tags_device ON tags (device, expires_at)');
+    this.db.exec('DROP INDEX IF EXISTS tags_expiry');
+    // Reads take the most recently claimed tags; the per-device cap counts one
+    // device's rows on every claim.
+    this.db.exec('CREATE INDEX IF NOT EXISTS tags_claimed ON tags (claimed_at)');
+    this.db.exec('CREATE INDEX IF NOT EXISTS tags_device ON tags (device)');
   }
 
   close(): void {
     this.db.close();
   }
 
-  /** Delete expired tags so reads never have to filter a growing table. */
+  /**
+   * The lock column used to be the tag's lifetime, so an older database calls it
+   * expires_at and holds the same seconds under the new meaning: a row past that
+   * instant is claimable by anyone rather than gone. Renaming in place keeps every
+   * existing tag and its owner.
+   */
+  private migrateExpiryToLock(): void {
+    const columns = this.db.prepare('PRAGMA table_info(tags)').all() as unknown as {
+      name: string;
+    }[];
+    const names = new Set(columns.map((c) => c.name));
+    if (names.has('expires_at') && !names.has('locked_until')) {
+      this.db.exec('ALTER TABLE tags RENAME COLUMN expires_at TO locked_until');
+    }
+  }
+
+  /**
+   * Drop tags older than the retention window, if one is configured.
+   *
+   * Tags do not expire: an aircraft stays tagged until its owner releases it or
+   * someone else claims it once the lock has run out. So this exists only for an
+   * operator who wants the table to forget eventually, and does nothing by default.
+   */
   sweep(): number {
+    if (config.tagRetentionSeconds <= 0) return 0;
     const removed = this.db
-      .prepare('DELETE FROM tags WHERE expires_at <= ?')
-      .run(nowSec()).changes;
+      .prepare('DELETE FROM tags WHERE claimed_at <= ?')
+      .run(nowSec() - config.tagRetentionSeconds).changes;
     if (removed > 0) this.snapshot = null;
     return Number(removed);
   }
@@ -126,15 +153,22 @@ export class TagStore {
     if (this.snapshot !== null) return this.snapshot;
 
     const now = nowSec();
+    // Every tag, not just locked ones: a tag is permanent until it is released or
+    // taken over, and the ttl field now says how much exclusivity is left, not how
+    // long the tag has to live. Past maxFeedTags the response carries the most
+    // recently claimed ones, so an old tag can fall out of the feed while still
+    // being held.
     const rows = this.db
       .prepare(
-        `SELECT icao, handle, expires_at FROM tags
-         WHERE expires_at > ? ORDER BY claimed_at DESC LIMIT ?`,
+        `SELECT icao, handle, locked_until FROM tags
+         ORDER BY claimed_at DESC LIMIT ?`,
       )
-      .all(now, config.maxFeedTags) as unknown as TagRow[];
+      .all(config.maxFeedTags) as unknown as TagRow[];
 
     this.snapshot = {
-      lines: rows.map((r) => tagLine({ icao: r.icao, handle: r.handle, ttl: r.expires_at - now })),
+      lines: rows.map((r) =>
+        tagLine({ icao: r.icao, handle: r.handle, ttl: Math.max(0, r.locked_until - now) }),
+      ),
       lockSeconds: config.lockSeconds,
     };
     return this.snapshot;
@@ -219,8 +253,13 @@ export class TagStore {
   }
 
   /**
-   * Claim an aircraft. Held against other devices until it expires; the owner may
-   * re-claim to refresh. Returns 409 with the current owner if someone else holds it.
+   * Claim an aircraft.
+   *
+   * A tag has no lifetime: it stays on the aircraft, with its owner's handle, until
+   * that owner releases it or someone else takes it over. What expires is the
+   * exclusivity. For `lockSeconds` after the claim nobody else can have it, and after
+   * that the first other device to ask takes it, which is the same call with no
+   * special case. The owner re-claiming pushes the lock out again.
    */
   claim(deviceId: string, icao: string): Reply {
     const now = nowSec();
@@ -229,29 +268,33 @@ export class TagStore {
       return { status: 401, body: 'unregistered device', detail: 'unregistered' };
     }
 
-    const held = this.db
-      .prepare('SELECT * FROM tags WHERE icao = ? AND expires_at > ?')
-      .get(icao, now) as TagRow | undefined;
+    const held = this.db.prepare('SELECT * FROM tags WHERE icao = ?').get(icao) as
+      | TagRow
+      | undefined;
 
-    if (held !== undefined && held.device !== deviceId) {
+    if (held !== undefined && held.device !== deviceId && held.locked_until > now) {
       return {
         status: 409,
-        body: `held\nhandle=${held.handle}\nttl=${held.expires_at - now}`,
+        body: `held\nhandle=${held.handle}\nlock=${held.locked_until - now}`,
         handle: held.handle,
         detail: 'held-by-other',
       };
     }
 
-    // Concurrency cap, counted from the table rather than a stored tally, so an
-    // expired tag stops occupying a slot the moment it expires. Refreshing a tag
-    // this device already holds is exempt: it consumes no new slot.
+    // Concurrency cap, counted from the table rather than a stored tally. Refreshing
+    // a tag this device already holds is exempt: it consumes no new slot. Taking one
+    // over from another device is not, and it hands that device its slot back.
+    //
+    // Every row counts, unlocked ones included, because a tag now sits there until it
+    // is released or taken. Ten aircraft on the map at once is what the cap means; a
+    // device that wants an eleventh releases one or uses Clear Tags.
     //
     // No global cap: a claim is never refused because other people hold tags, which
     // is what the old table-full check did.
-    if (held === undefined) {
+    if (held === undefined || held.device !== deviceId) {
       const mine = this.db
-        .prepare('SELECT COUNT(*) AS n FROM tags WHERE device = ? AND expires_at > ?')
-        .get(deviceId, now) as { n: number };
+        .prepare('SELECT COUNT(*) AS n FROM tags WHERE device = ?')
+        .get(deviceId) as { n: number };
       if (mine.n >= config.maxTagsPerDevice) {
         return {
           status: 429,
@@ -264,19 +307,19 @@ export class TagStore {
 
     this.db
       .prepare(
-        `INSERT INTO tags (icao, handle, device, claimed_at, expires_at)
+        `INSERT INTO tags (icao, handle, device, claimed_at, locked_until)
          VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(icao) DO UPDATE SET
            handle = excluded.handle,
            device = excluded.device,
            claimed_at = excluded.claimed_at,
-           expires_at = excluded.expires_at`,
+           locked_until = excluded.locked_until`,
       )
       .run(icao, device.handle, deviceId, now, now + config.lockSeconds);
     this.snapshot = null;
     return {
       status: 200,
-      body: `claimed\nhandle=${device.handle}\nttl=${config.lockSeconds}`,
+      body: `claimed\nhandle=${device.handle}\nlock=${config.lockSeconds}`,
       handle: device.handle,
     };
   }

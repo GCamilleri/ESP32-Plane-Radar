@@ -42,6 +42,13 @@ struct FeedHeader {
 struct FeedTag {
   uint32_t icao;
   char handle[kTagHandleLen];
+  /**
+   * Seconds of exclusivity left, not how long the tag lives.
+   *
+   * A tag stays on its aircraft until its owner releases it or another radar claims
+   * it, which only becomes possible once this reaches 0. Nothing on the device acts
+   * on it; it is parsed so the server can say something here later.
+   */
   uint16_t ttl_sec;
 };
 
